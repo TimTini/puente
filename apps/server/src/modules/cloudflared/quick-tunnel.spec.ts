@@ -3,6 +3,7 @@ import type { CommandExecutor, ExecResult } from '../../common/executor';
 import { shq } from '../../common/shell';
 import {
   blankQuick,
+  buildQuickInspect,
   buildQuickLaunch,
   consumeQuickLog,
   inspectQuickTunnel,
@@ -164,6 +165,32 @@ describe('startQuickTunnel', () => {
     expect(runtime.runtimeDir).toContain('/puente-quick/');
   });
 
+  it('keeps polling when the log is still requesting a quick tunnel', async () => {
+    let inspects = 0;
+    const { target: t } = target((command) => {
+      if (command.startsWith('printf')) return { stdout: '/home/alice' };
+      if (command.includes('nohup')) return { stdout: 'started\n' };
+      if (command.startsWith('cat ')) {
+        return {
+          stdout:
+            inspects === 0
+              ? 'INF Requesting new quick Tunnel on trycloudflare.com\n'
+              : READY_LOG,
+        };
+      }
+      if (command.includes('echo OWNED')) {
+        inspects += 1;
+        return { stdout: inspects === 1 ? 'OWNED \n' : 'OWNED 4242\nPIDFILE 4242\n' };
+      }
+      return { stdout: '' };
+    });
+    const runtime = await startQuickTunnel(t, 'node_1', 'http://127.0.0.1:8080', 'cloudflared', fast);
+    expect(runtime.state).toBe('running');
+    expect(runtime.publicUrl).toBe('https://demo.trycloudflare.com');
+    expect(runtime.lastError).toBeNull();
+    expect(runtime.marker).toHaveLength(32);
+  });
+
   it('reaches running when the owned process appears after one empty inspect', async () => {
     let inspects = 0;
     const { target: t } = target((command) => {
@@ -292,6 +319,17 @@ describe('inspectQuickTunnel', () => {
     const dead = target(() => ({ stdout: 'OWNED \n' }));
     const gone = await inspectQuickTunnel(dead.target, runtime);
     expect(gone).toMatchObject({ state: 'stopped', publicUrl: null, marker: null });
+  });
+});
+
+describe('buildQuickInspect', () => {
+  it('reads args with BSD ps flag order and falls back to command', () => {
+    const script = buildQuickInspect('/tmp/puente-quick/node/abc', 'a'.repeat(32));
+    expect(script).toContain('pgrep -x cloudflared');
+    expect(script).toContain('ps -p "$p" -o args=');
+    expect(script).toContain('ps -p "$p" -o command=');
+    expect(script).not.toContain('ps -o args= -p');
+    expect(script).toContain('a'.repeat(32));
   });
 });
 

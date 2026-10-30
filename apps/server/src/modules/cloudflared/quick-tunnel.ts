@@ -178,18 +178,37 @@ export function buildQuickLaunch(cmd: string, origin: string, dir: string): stri
   );
 }
 
+/**
+ * Read a cloudflared command line. BSD ps treats `-o` before `-p` as a bad format and
+ * prints nothing; GNU accepts either order. `command=` covers a blank `args=`.
+ * `$p` is the loop variable from `pgrep -x cloudflared`.
+ */
+function cloudflaredArgs(): string {
+  return 'args=$(ps -p "$p" -o args= 2>/dev/null); [ -n "$args" ] || args=$(ps -p "$p" -o command= 2>/dev/null)';
+}
+
 export function buildQuickInspect(dir: string, marker: string): string {
   const markerQ = shq(marker);
   const pidfile = shq(`${dir}/cloudflared.pid`);
   const launcher = shq(`${dir}/launcher.pid`);
   return [
     `owned() { for p in $(pgrep -x cloudflared 2>/dev/null); do`,
-    `case "$(ps -o args= -p "$p" 2>/dev/null)" in *${markerQ}*) echo "$p";; esac; done; }`,
+    `${cloudflaredArgs()};`,
+    `case "$args" in *${markerQ}*) echo "$p";; esac; done; }`,
     `echo OWNED $(owned | tr '\\n' ' ')`,
     `if [ -f ${pidfile} ]; then echo PIDFILE $(tr -cd '0-9' < ${pidfile}); fi`,
     `lp=$(tr -cd '0-9' < ${launcher} 2>/dev/null || true)`,
     `if [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null; then echo LAUNCHER_ALIVE "$lp"; fi`,
   ].join('; ');
+}
+
+/** Startup lines are not an exit. A trycloudflare URL means the process is still coming up. */
+function quickLogStillStarting(log: string): boolean {
+  return (
+    /Requesting new quick Tunnel/i.test(log) ||
+    /Registered tunnel connection/i.test(log) ||
+    matchTryCloudflareUrl(log) !== null
+  );
 }
 
 export function buildQuickLogRead(dir: string): string {
@@ -362,7 +381,8 @@ export async function startQuickTunnel(
       });
     }
     const empty = info.owned.length === 0 && !info.launcherAlive;
-    if (empty) {
+    // A startup line, or a cloudflared whose args contain this runtime dir, is still starting.
+    if (empty && !quickLogStillStarting(log.stdout)) {
       const finished = log.stdout.trim().length > 0;
       const repeated = emptySince !== null && (finished || now() - emptySince >= pollMs);
       if (repeated) {
@@ -416,7 +436,7 @@ function signalOwned(
   if (list.length === 0 || !runtime.marker) return Promise.resolve();
   const markerQ = shq(runtime.marker);
   return target.exec.exec(
-    `for p in ${list.join(' ')}; do case "$(ps -o args= -p "$p" 2>/dev/null)" in *${markerQ}*) kill -${signal} "$p";; esac; done`,
+    `for p in ${list.join(' ')}; do ${cloudflaredArgs()}; case "$args" in *${markerQ}*) kill -${signal} "$p";; esac; done`,
   );
 }
 
