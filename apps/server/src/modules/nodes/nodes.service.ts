@@ -646,7 +646,10 @@ export class NodesService {
       return this.emitUpdated(row.id);
     }
     await this.stopOwnedQuick(row);
-    this.events.info('node.quick', `Quick Tunnel stopped on "${row.name}"`, { nodeId: row.id });
+    const after = coerceQuick(this.getRow(row.id).quickRuntime);
+    if (after.state === 'stopped') {
+      this.events.info('node.quick', `Quick Tunnel stopped on "${row.name}"`, { nodeId: row.id });
+    }
     return this.emitUpdated(row.id);
   }
 
@@ -655,20 +658,28 @@ export class NodesService {
     try {
       await this.withTarget(row, async (target) => {
         const result = await this.cloudflared.stopQuick(target, runtime);
-        if (result === 'mismatch') {
+        if (result === 'mismatch' || result === 'absent') {
           this.setState(row.id, {
-            quickRuntime: blankQuick({
-              state: 'error',
-              lastError: 'The recorded pid belongs to a different process. It was left running.',
-            }),
+            quickRuntime: {
+              ...runtime,
+              state: 'unknown',
+              publicUrl: null,
+              lastError:
+                result === 'mismatch'
+                  ? 'The recorded pid belongs to a different process. It was left running.'
+                  : runtime.lastError,
+            },
           });
-          throw new ConflictException({
-            statusCode: 409,
-            message: 'The recorded process is not this Quick Tunnel. It was left running.',
-            code: 'QUICK_OWNERSHIP',
-          });
+          if (result === 'mismatch') {
+            throw new ConflictException({
+              statusCode: 409,
+              message: 'The recorded process is not this Quick Tunnel. It was left running.',
+              code: 'QUICK_OWNERSHIP',
+            });
+          }
+          return;
         }
-        if (result !== 'stopped' && result !== 'absent') {
+        if (result !== 'stopped') {
           this.setState(row.id, {
             quickRuntime: { ...runtime, state: 'unknown', publicUrl: null },
           });

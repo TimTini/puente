@@ -320,6 +320,12 @@ describe('inspectQuickTunnel', () => {
     const dead = target(() => ({ stdout: 'OWNED \n' }));
     const gone = await inspectQuickTunnel(dead.target, runtime);
     expect(gone).toMatchObject({ state: 'stopped', publicUrl: null, marker: null });
+
+    const launcher = target(() => ({ stdout: 'OWNED \nLAUNCHER_ALIVE 99\n' }));
+    const held = await inspectQuickTunnel(launcher.target, runtime);
+    expect(held.marker).toBe(runtime.marker);
+    expect(held.runtimeDir).toBe(runtime.runtimeDir);
+    expect(held.state).toBe('unknown');
   });
 });
 
@@ -330,6 +336,7 @@ describe('buildQuickInspect', () => {
     expect(script).toContain('ps -ww -p "$p" -o args=');
     expect(script).toContain('ps -ww -p "$p" -o command=');
     expect(script).not.toContain('ps -o args= -p');
+    expect(script).not.toContain(';; case');
     expect(script).toContain('a'.repeat(32));
   });
 });

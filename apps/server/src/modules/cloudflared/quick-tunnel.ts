@@ -193,9 +193,7 @@ export function buildQuickInspect(dir: string, marker: string): string {
   const pidfile = shq(`${dir}/cloudflared.pid`);
   const launcher = shq(`${dir}/launcher.pid`);
   return [
-    `owned() { for p in $(pgrep -x cloudflared 2>/dev/null); do`,
-    `${cloudflaredArgs()};`,
-    `case "$args" in *${markerQ}*) echo "$p";; esac; done; }`,
+    `owned() { for p in $(pgrep -x cloudflared 2>/dev/null); do ${cloudflaredArgs()}; case "$args" in *${markerQ}*) echo "$p";; esac; done; }`,
     `echo OWNED $(owned | tr '\\n' ' ')`,
     `if [ -f ${pidfile} ]; then echo PIDFILE $(tr -cd '0-9' < ${pidfile}); fi`,
     `lp=$(tr -cd '0-9' < ${launcher} 2>/dev/null || true)`,
@@ -404,7 +402,7 @@ export async function startQuickTunnel(
 
   if (last && last.owned.length > 0) {
     const stopped = await stopQuickTunnel(target, prepared, opts);
-    if (stopped === 'stopped' || stopped === 'absent') {
+    if (stopped === 'stopped') {
       return blankQuick({
         state: 'error',
         publicUrl: null,
@@ -457,7 +455,7 @@ export async function stopQuickTunnel(
   if (seen.owned.length === 0 && !seen.launcherAlive) {
     const again = await readInspect(target, runtime);
     if (again === 'unknown') throw new Error('Lost contact while stopping the Quick Tunnel.');
-    if (again.owned.length === 0 && !again.launcherAlive) return 'absent';
+    if (again.owned.length === 0 && !again.launcherAlive) return 'stopped';
     seen = again;
   }
   // Alive pid whose args do not contain our marker: reused pid, or not our process. Do not kill it.
@@ -532,10 +530,7 @@ export async function inspectQuickTunnel(
     });
   }
   if (info.launcherAlive) {
-    return blankQuick({
-      state: 'error',
-      lastError: 'The recorded pid belongs to a different process. It was left running.',
-    });
+    return { ...current, state: 'unknown', publicUrl: null };
   }
   const again = await readInspect(target, current);
   if (again === 'unknown') return { ...current, state: 'unknown', publicUrl: null };

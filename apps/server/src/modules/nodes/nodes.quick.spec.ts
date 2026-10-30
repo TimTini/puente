@@ -309,4 +309,25 @@ describe('Quick Tunnel on a node', () => {
     expect(JSON.stringify(node)).not.toContain(MARKER);
     expect(JSON.stringify(node)).not.toContain(newerMarker);
   });
+
+  it('keeps the marker when stop cannot see the process', async () => {
+    dbs.db
+      .update(nodes)
+      .set({
+        quickOrigin: ORIGIN,
+        quickRuntime: blankQuick({ state: 'unknown', marker: MARKER, runtimeDir: DIR, pid: 5 }),
+      })
+      .where(eq(nodes.id, 'node_q'))
+      .run();
+    stopQuick.mockResolvedValue('absent');
+    inspectQuick.mockResolvedValue(
+      blankQuick({ state: 'unknown', marker: MARKER, runtimeDir: DIR, pid: 5 }),
+    );
+    const node = await svc.setConnector('node_q', 'stop', { type: 'quick' });
+    expect(node.quickTunnel.state).toBe('unknown');
+    const row = dbs.db.select().from(nodes).where(eq(nodes.id, 'node_q')).get();
+    const stored = row?.quickRuntime as { marker?: string; state?: string } | null;
+    expect(stored?.marker).toBe(MARKER);
+    expect(stored?.state).toBe('unknown');
+  });
 });
