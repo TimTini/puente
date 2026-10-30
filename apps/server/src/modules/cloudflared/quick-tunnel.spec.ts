@@ -145,6 +145,8 @@ describe('startQuickTunnel', () => {
     expect(runtime.lastError).toContain('http://127.0.0.1:8080/health');
     expect(runtime.lastError).not.toContain('token=secret');
     expect(runtime.lastError).not.toContain(noise);
+    expect(runtime.marker).toHaveLength(32);
+    expect(runtime.runtimeDir).toContain('/puente-quick/');
     expect(exec.commands.some((command) => /kill -TERM|kill -KILL/.test(command))).toBe(false);
   });
 
@@ -158,6 +160,46 @@ describe('startQuickTunnel', () => {
       fast,
     );
     expect(runtime.lastError).toBe('cloudflared exited before the Quick Tunnel was ready.');
+    expect(runtime.marker).toHaveLength(32);
+    expect(runtime.runtimeDir).toContain('/puente-quick/');
+  });
+
+  it('reaches running when the owned process appears after one empty inspect', async () => {
+    let inspects = 0;
+    const { target: t } = target((command) => {
+      if (command.startsWith('printf')) return { stdout: '/home/alice' };
+      if (command.includes('nohup')) return { stdout: 'started\n' };
+      if (command.startsWith('cat ')) return { stdout: READY_LOG };
+      if (command.includes('echo OWNED')) {
+        inspects += 1;
+        return { stdout: inspects === 1 ? 'OWNED \n' : 'OWNED 4242\nPIDFILE 4242\n' };
+      }
+      return { stdout: '' };
+    });
+    const runtime = await startQuickTunnel(t, 'node_1', 'http://127.0.0.1:8080', 'cloudflared', fast);
+    expect(runtime.state).toBe('running');
+    expect(runtime.publicUrl).toBe('https://demo.trycloudflare.com');
+    expect(runtime.pid).toBe(4242);
+    expect(runtime.marker).toHaveLength(32);
+  });
+
+  it('keeps the marker when the deadline arrives before ownership is known', async () => {
+    let clock = 0;
+    const { target: t, exec } = scripted({ log: '\n', inspect: 'OWNED \n' });
+    const runtime = await startQuickTunnel(t, 'node_1', 'http://127.0.0.1:8080', 'cloudflared', {
+      deadlineMs: 1000,
+      graceMs: 0,
+      pollMs: 500,
+      now: () => clock,
+      sleep: async () => {
+        clock += 1000;
+      },
+    });
+    expect(runtime.state).toBe('unknown');
+    expect(runtime.publicUrl).toBeNull();
+    expect(runtime.marker).toHaveLength(32);
+    expect(runtime.runtimeDir).toContain('/puente-quick/');
+    expect(exec.commands.some((command) => /kill -TERM|kill -KILL/.test(command))).toBe(false);
   });
 
   it('keeps the marker and hides the URL when SSH drops after launch', async () => {

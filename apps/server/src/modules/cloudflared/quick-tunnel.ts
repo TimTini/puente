@@ -328,6 +328,9 @@ export async function startQuickTunnel(
   const now = opts.now ?? Date.now;
   const pollMs = opts.pollMs ?? QUICK_POLL_MS;
   const began = now();
+  // macOS can report a dead nohup pid before cloudflared shows up. One empty inspect is not an exit.
+  let emptySince: number | null = null;
+  let last: QuickInspectInfo | null = null;
 
   while (now() - began < deadline) {
     let log: { code: number; stdout: string };
@@ -347,12 +350,7 @@ export async function startQuickTunnel(
     const info = await readInspect(target, prepared);
     if (info === 'unknown')
       return lost(prepared, 'Lost contact after the Quick Tunnel process was started.');
-    if (info.owned.length === 0 && !info.launcherAlive) {
-      return blankQuick({
-        state: 'error',
-        lastError: earlyExitError(log.stdout, origin),
-      });
-    }
+    last = info;
     if (readyFrom(info, { url, registered })) {
       return blankQuick({
         state: 'running',
@@ -363,13 +361,48 @@ export async function startQuickTunnel(
         runtimeDir: dir,
       });
     }
+    const empty = info.owned.length === 0 && !info.launcherAlive;
+    if (empty) {
+      const finished = log.stdout.trim().length > 0;
+      const repeated = emptySince !== null && (finished || now() - emptySince >= pollMs);
+      if (repeated) {
+        return blankQuick({
+          state: 'error',
+          publicUrl: null,
+          lastError: earlyExitError(log.stdout, origin),
+          marker,
+          runtimeDir: dir,
+        });
+      }
+      if (emptySince === null) emptySince = now();
+    } else {
+      emptySince = null;
+    }
     await sleep(pollMs);
   }
 
-  await stopQuickTunnel(target, prepared, opts);
+  if (last && last.owned.length > 0) {
+    const stopped = await stopQuickTunnel(target, prepared, opts);
+    if (stopped === 'stopped' || stopped === 'absent') {
+      return blankQuick({
+        state: 'error',
+        publicUrl: null,
+        lastError: 'Quick Tunnel did not become ready before the deadline.',
+      });
+    }
+    return blankQuick({
+      state: 'error',
+      publicUrl: null,
+      lastError: 'Quick Tunnel did not become ready before the deadline.',
+      marker,
+      runtimeDir: dir,
+    });
+  }
   return blankQuick({
-    state: 'error',
-    lastError: 'Quick Tunnel did not become ready before the deadline.',
+    state: 'unknown',
+    publicUrl: null,
+    marker,
+    runtimeDir: dir,
   });
 }
 
