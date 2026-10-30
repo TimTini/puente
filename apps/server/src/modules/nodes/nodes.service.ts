@@ -668,6 +668,12 @@ export class NodesService {
             code: 'QUICK_OWNERSHIP',
           });
         }
+        if (result !== 'stopped' && result !== 'absent') {
+          this.setState(row.id, {
+            quickRuntime: { ...runtime, state: 'unknown', publicUrl: null },
+          });
+          return;
+        }
         this.setState(row.id, { quickRuntime: blankQuick({ state: 'stopped' }) });
       });
     } catch (err) {

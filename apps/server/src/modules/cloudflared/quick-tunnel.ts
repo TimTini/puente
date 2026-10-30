@@ -184,7 +184,8 @@ export function buildQuickLaunch(cmd: string, origin: string, dir: string): stri
  * `$p` is the loop variable from `pgrep -x cloudflared`.
  */
 function cloudflaredArgs(): string {
-  return 'args=$(ps -p "$p" -o args= 2>/dev/null); [ -n "$args" ] || args=$(ps -p "$p" -o command= 2>/dev/null)';
+  // BSD ps clips argv to the terminal width. -ww is unlimited, and -p must come before -o.
+  return 'args=$(ps -ww -p "$p" -o args= 2>/dev/null); [ -n "$args" ] || args=$(ps -ww -p "$p" -o command= 2>/dev/null)';
 }
 
 export function buildQuickInspect(dir: string, marker: string): string {
@@ -450,11 +451,18 @@ export async function stopQuickTunnel(
   if (!runtime.marker || !runtime.runtimeDir) return 'absent';
   const sleep = opts.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const grace = opts.graceMs ?? QUICK_STOP_GRACE_MS;
-  const first = await readInspect(target, runtime);
-  if (first === 'unknown') throw new Error('Lost contact while stopping the Quick Tunnel.');
+  let seen = await readInspect(target, runtime);
+  if (seen === 'unknown') throw new Error('Lost contact while stopping the Quick Tunnel.');
+  // One empty look can be a truncated argv. Confirm with a second wide inspect before dropping it.
+  if (seen.owned.length === 0 && !seen.launcherAlive) {
+    const again = await readInspect(target, runtime);
+    if (again === 'unknown') throw new Error('Lost contact while stopping the Quick Tunnel.');
+    if (again.owned.length === 0 && !again.launcherAlive) return 'absent';
+    seen = again;
+  }
   // Alive pid whose args do not contain our marker: reused pid, or not our process. Do not kill it.
-  if (first.owned.length === 0) return first.launcherAlive ? 'mismatch' : 'absent';
-  await signalOwned(target, runtime, 'TERM', first.owned);
+  if (seen.owned.length === 0) return seen.launcherAlive ? 'mismatch' : 'absent';
+  await signalOwned(target, runtime, 'TERM', seen.owned);
   const slices = 5;
   for (let i = 0; i < slices; i++) {
     if (grace > 0) await sleep(Math.max(1, Math.floor(grace / slices)));
@@ -528,6 +536,11 @@ export async function inspectQuickTunnel(
       state: 'error',
       lastError: 'The recorded pid belongs to a different process. It was left running.',
     });
+  }
+  const again = await readInspect(target, current);
+  if (again === 'unknown') return { ...current, state: 'unknown', publicUrl: null };
+  if (again.owned.length > 0 || again.launcherAlive) {
+    return { ...current, state: 'unknown', publicUrl: null };
   }
   return blankQuick({ state: 'stopped' });
 }

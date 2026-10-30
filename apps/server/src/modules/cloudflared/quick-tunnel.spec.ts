@@ -292,6 +292,7 @@ describe('stopQuickTunnel', () => {
         (command) =>
           command.includes('for p in 4242') &&
           command.includes('kill -TERM') &&
+          command.includes('ps -ww -p') &&
           command.includes('b'.repeat(32)),
       ),
     ).toBe(true);
@@ -326,8 +327,8 @@ describe('buildQuickInspect', () => {
   it('reads args with BSD ps flag order and falls back to command', () => {
     const script = buildQuickInspect('/tmp/puente-quick/node/abc', 'a'.repeat(32));
     expect(script).toContain('pgrep -x cloudflared');
-    expect(script).toContain('ps -p "$p" -o args=');
-    expect(script).toContain('ps -p "$p" -o command=');
+    expect(script).toContain('ps -ww -p "$p" -o args=');
+    expect(script).toContain('ps -ww -p "$p" -o command=');
     expect(script).not.toContain('ps -o args= -p');
     expect(script).toContain('a'.repeat(32));
   });
