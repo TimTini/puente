@@ -65,7 +65,33 @@ docker compose up -d          # panel on http://localhost:5006, state in a named
 ```
 
 State persists in the `puente-data` volume (mounted at `/data`). Override the port
-with the `PUENTE_PORT` environment variable.
+with the `PUENTE_PORT` environment variable. A Quick Tunnel origin is opened **from inside
+the container**: `localhost` there is not your browser, and the host is `host.docker.internal`
+on Docker Desktop.
+
+### Quick Tunnel
+
+A Quick Tunnel exposes one http(s) origin on a temporary `https://*.trycloudflare.com` URL.
+It does not need a Cloudflare API token or a domain. Closing the browser does not stop it.
+Restarting it changes the URL. One Quick Tunnel per node, alongside the named tunnel.
+
+An existing database needs a one-shot migration. Stop puente first. Build once
+(`pnpm --filter puente build`), then from the repo:
+
+```bash
+node apps/server/scripts/migrate-quick-tunnel.cjs --db ~/.puente/data.db
+node apps/server/scripts/migrate-quick-tunnel.cjs --db ~/.puente/data.db --apply
+```
+
+The first command is a dry-run. `--apply` writes a SQLite backup next to the database, then adds
+two nullable columns. It does not change named tunnels, routes, or credentials. Restore by
+stopping puente and replacing `data.db` with that backup (and its `-wal`/`-shm` siblings, if you
+copied those too). A backup taken by `puente backup` is the whole database; after restoring an
+older one, run the migration again. Startup will say so instead of altering the file itself.
+
+Quick Tunnels have no uptime guarantee, change hostname every start, allow about 200 in-flight
+requests, and do not support Server-Sent Events. They are for trying an origin, not for
+production hostnames. See [Cloudflare's Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).
 
 ---
 
@@ -134,7 +160,7 @@ Environment variables: `PUENTE_PORT` (default `5006`), `PUENTE_DATA_DIR` (defaul
 
 ## Concepts
 
-- **Node** — a machine that runs a `cloudflared` connector. One node = one Cloudflare Tunnel. The machine running puente is the `local` node; everything else is an `ssh` node.
+- **Node** — a machine. It can run one named Cloudflare Tunnel and, separately, one Quick Tunnel. The machine running puente is the `local` node; everything else is an `ssh` node.
 - **Route** — a mapping from a subdomain (e.g. `vw.example.com`) to a local service on a node (e.g. `http://localhost:7008`). Publishing a route updates the tunnel's ingress rules **and** creates the proxied DNS record.
 
 ---

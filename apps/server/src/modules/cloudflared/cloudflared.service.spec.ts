@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CloudflaredService, type Target } from './cloudflared.service';
+import { CloudflaredService, CONNECTOR_PIDS, type Target } from './cloudflared.service';
+import { isNamedConnectorArgs } from './quick-tunnel';
 import { LocalExecutor, type CommandExecutor, type ExecResult } from '../../common/executor';
 
 /**
@@ -61,45 +62,56 @@ function targetWith(reply: (cmd: string) => Partial<ExecResult>): {
 describe('finding a running connector', () => {
   const shell = new LocalExecutor();
 
-  it('does not find itself — where `pgrep -f` did', async () => {
-    const naive = await shell.exec(
-      `pgrep -f '${ABSENT} tunnel run' >/dev/null 2>&1 && echo active || echo inactive`,
-    );
-    expect(naive.stdout.trim()).toBe('active'); // a false positive, with nothing running
+  // GNU pgrep on Linux matches the bash -lc carrier. Git Bash on Windows does not, so this
+  // proof only runs where that self-match exists.
+  it.skipIf(process.platform !== 'linux')(
+    'does not find itself — where `pgrep -f` did',
+    async () => {
+      const naive = await shell.exec(
+        `pgrep -f '${ABSENT} tunnel run' >/dev/null 2>&1 && echo active || echo inactive`,
+      );
+      expect(naive.stdout.trim()).toBe('active'); // a false positive, with nothing running
 
-    expect((await shell.exec(pidProbe(ABSENT))).stdout.trim()).toBe('inactive');
-  });
+      expect((await shell.exec(pidProbe(ABSENT))).stdout.trim()).toBe('inactive');
+    },
+  );
 
-  it('does not find itself even though the script names cloudflared elsewhere', async () => {
-    // Why the bracket trick is not the fix. `[c]loudflared` cannot match its own literal, but
-    // these scripts mention cloudflared again — the systemd unit, at least — and the `.*`
-    // needed to span a connector's flags happily bridges that mention to the `tunnel run`
-    // further along, matching the carrier all over again.
-    const mention = `systemctl is-active ${ABSENT} >/dev/null 2>&1; `;
+  it.skipIf(process.platform !== 'linux')(
+    'does not find itself even though the script names cloudflared elsewhere',
+    async () => {
+      // Why the bracket trick is not the fix. `[c]loudflared` cannot match its own literal, but
+      // these scripts mention cloudflared again — the systemd unit, at least — and the `.*`
+      // needed to span a connector's flags happily bridges that mention to the `tunnel run`
+      // further along, matching the carrier all over again.
+      const mention = `systemctl is-active ${ABSENT} >/dev/null 2>&1; `;
 
-    const bracketed = await shell.exec(
-      mention +
-        `pgrep -f '[${ABSENT[0]}]${ABSENT.slice(1)} .*tunnel run' >/dev/null 2>&1 && echo active || echo inactive`,
-    );
-    expect(bracketed.stdout.trim()).toBe('active'); // still a false positive
+      const bracketed = await shell.exec(
+        mention +
+          `pgrep -f '[${ABSENT[0]}]${ABSENT.slice(1)} .*tunnel run' >/dev/null 2>&1 && echo active || echo inactive`,
+      );
+      expect(bracketed.stdout.trim()).toBe('active'); // still a false positive
 
-    const shipped = await shell.exec(mention + pidProbe(ABSENT));
-    expect(shipped.stdout.trim()).toBe('inactive');
-  });
+      const shipped = await shell.exec(mention + pidProbe(ABSENT));
+      expect(shipped.stdout.trim()).toBe('inactive');
+    },
+  );
 
-  it('does not kill the shell that is about to start the connector', async () => {
-    const naive = await shell.exec(
-      `( pkill -f '${ABSENT} tunnel run' 2>/dev/null || true ) ; echo started`,
-    );
-    // The old shape never reached the echo: pkill took out its own wrapper shell.
-    expect(naive.stdout).not.toContain('started');
+  it.skipIf(process.platform !== 'linux')(
+    'does not kill the shell that is about to start the connector',
+    async () => {
+      const naive = await shell.exec(
+        `( pkill -f '${ABSENT} tunnel run' 2>/dev/null || true ) ; echo started`,
+      );
+      // The old shape never reached the echo: pkill took out its own wrapper shell.
+      expect(naive.stdout).not.toContain('started');
 
-    const byPid = await shell.exec(
-      `probe() { for p in $(pgrep -x ${ABSENT} 2>/dev/null); do echo "$p"; done; }; ` +
-        `p=$(probe); [ -n "$p" ] && kill $p 2>/dev/null; true; echo started`,
-    );
-    expect(byPid.stdout).toContain('started');
-  });
+      const byPid = await shell.exec(
+        `probe() { for p in $(pgrep -x ${ABSENT} 2>/dev/null); do echo "$p"; done; }; ` +
+          `p=$(probe); [ -n "$p" ] && kill $p 2>/dev/null; true; echo started`,
+      );
+      expect(byPid.stdout).toContain('started');
+    },
+  );
 
   it('is what the service actually ships — no command-line matching anywhere', async () => {
     const { target, exec } = targetWith(() => ({ stdout: 'inactive' }));
@@ -166,5 +178,19 @@ describe('installConnector', () => {
 
     expect(result.serviceInstalled).toBe(true);
     expect(result.note).toBeNull();
+  });
+});
+
+describe('named cleanup leaves Quick Tunnel processes alone', () => {
+  it('matches tunnel run and skips a quick runtime path', () => {
+    expect(CONNECTOR_PIDS).toContain('*"tunnel run"*');
+    expect(CONNECTOR_PIDS).toContain('"/puente-quick/"');
+    expect(CONNECTOR_PIDS).not.toContain('pkill');
+    expect(isNamedConnectorArgs('cloudflared tunnel run --token secret')).toBe(true);
+    expect(
+      isNamedConnectorArgs(
+        'cloudflared tunnel --url http://127.0.0.1/tunnel run --config /home/a/.puente/puente-quick/node/abc/config.yml',
+      ),
+    ).toBe(false);
   });
 });

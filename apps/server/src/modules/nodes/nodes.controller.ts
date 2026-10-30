@@ -9,10 +9,12 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import {
+  ConnectorInputSchema,
   CreateNodeSchema,
   ProvisionNodeSchema,
   SshBootstrapSchema,
   UpdateNodeSchema,
+  type ConnectorInput,
   type CreateNodeInput,
   type Node,
   type ProvisionNodeInput,
@@ -78,11 +80,15 @@ export class NodesController {
   }
 
   @Post(':id/connector/:action')
-  connector(@Param('id') id: string, @Param('action') action: string): Promise<Node> {
+  connector(
+    @Param('id') id: string,
+    @Param('action') action: string,
+    @Body(new ZodBody(ConnectorInputSchema)) body: ConnectorInput,
+  ): Promise<Node> {
     if (action !== 'start' && action !== 'stop' && action !== 'restart') {
       throw new BadRequestException('action must be start, stop or restart');
     }
-    return this.nodes.setConnector(id, action);
+    return this.nodes.setConnector(id, action, body);
   }
 
   @Post(':id/refresh')

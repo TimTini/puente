@@ -1,5 +1,16 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import type { ServiceTarget, OriginRequestOptions } from '@puente/shared';
+import type { ServiceTarget, OriginRequestOptions, QuickState } from '@puente/shared';
+
+/** Process identity for one Quick Tunnel. Never copied onto the Node DTO. */
+export interface QuickRuntimeRecord {
+  state: QuickState;
+  publicUrl: string | null;
+  startedAt: string | null;
+  pid: number | null;
+  marker: string | null;
+  runtimeDir: string | null;
+  lastError: string | null;
+}
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -69,6 +80,8 @@ export const nodes = sqliteTable('nodes', {
   connectionCount: integer('connection_count'),
   lastError: text('last_error'),
   lastSeenAt: integer('last_seen_at'),
+  quickOrigin: text('quick_origin'),
+  quickRuntime: text('quick_runtime', { mode: 'json' }).$type<QuickRuntimeRecord | null>(),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });

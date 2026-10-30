@@ -4,6 +4,7 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { DB_PATH, ensureDataDir } from '../config/paths';
 import * as schema from './schema';
 import { migrateToAuditActor, migrateToRoles, migrateToWorkspaces } from './migrations';
+import { assertQuickTunnelSchema } from './quick-tunnel-migration';
 
 /**
  * Idempotent DDL. We ship an embedded schema bootstrap (CREATE TABLE IF NOT
@@ -66,6 +67,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   connection_count INTEGER,
   last_error TEXT,
   last_seen_at INTEGER,
+  quick_origin TEXT,
+  quick_runtime TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -197,6 +200,9 @@ export class DbService implements OnModuleDestroy {
     this.sqlite.pragma('foreign_keys = ON');
     this.sqlite.pragma('busy_timeout = 5000');
     this.sqlite.exec(BOOTSTRAP_SQL);
+    // Quick Tunnel columns are part of a new database. An older file is migrated by the
+    // one-shot script, not here — see quick-tunnel-migration.ts.
+    assertQuickTunnelSchema(this.sqlite);
     // Runs on every boot and is a no-op once applied; see migrations.ts.
     const report = migrateToWorkspaces(this.sqlite, Date.now());
     migrateToRoles(this.sqlite);

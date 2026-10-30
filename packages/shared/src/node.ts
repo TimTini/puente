@@ -19,6 +19,98 @@ export type ProvisionState = z.infer<typeof ProvisionStateSchema>;
 export const ConnectorRunStateSchema = z.enum(['unknown', 'stopped', 'running', 'error']);
 export type ConnectorRunState = z.infer<typeof ConnectorRunStateSchema>;
 
+/** Which connector a start/stop/restart applies to. A node can run both at once. */
+export const TunnelTypeSchema = z.enum(['named', 'quick']);
+export type TunnelType = z.infer<typeof TunnelTypeSchema>;
+
+export const QuickStateSchema = z.enum(['stopped', 'starting', 'running', 'unknown', 'error']);
+export type QuickState = z.infer<typeof QuickStateSchema>;
+
+export const QuickTunnelSchema = z.object({
+  origin: z.string().nullable(),
+  url: z.string().nullable(),
+  state: QuickStateSchema,
+  startedAt: z.string().nullable(),
+  lastError: z.string().nullable(),
+});
+export type QuickTunnel = z.infer<typeof QuickTunnelSchema>;
+
+const QUICK_ORIGIN_MAX = 2048;
+
+function isDnsName(host: string): boolean {
+  if (host.length === 0 || host.length > 253) return false;
+  return host
+    .split('.')
+    .every((label) => /^(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9])$/.test(label));
+}
+
+function hasControlChar(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 31 || code === 127) return true;
+  }
+  return false;
+}
+
+function isIpv4(host: string): boolean {
+  const parts = host.split('.');
+  return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+
+/** Absolute http(s) origin. Credentials, fragments and other protocols are rejected. */
+export const QuickOriginSchema = z
+  .string()
+  .max(QUICK_ORIGIN_MAX)
+  .superRefine((value, ctx) => {
+    const fail = (message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    if (hasControlChar(value) || value.includes('\\') || value.includes('#')) {
+      fail('Origin must be an absolute http(s) URL.');
+      return;
+    }
+    const match = /^(https?):\/\/([^/?#]+)([^?#]*)(\?[^#]*)?$/.exec(value.trim());
+    if (!match || value.trim() !== value) {
+      fail('Origin must be an absolute http(s) URL.');
+      return;
+    }
+    const authority = match[2] ?? '';
+    if (authority.includes('@')) {
+      fail('Origin must not include credentials.');
+      return;
+    }
+    let host = authority;
+    let port: string | null = null;
+    if (authority.startsWith('[')) {
+      const end = authority.indexOf(']');
+      const rest = end === -1 ? '' : authority.slice(end + 1);
+      host = end === -1 ? '' : authority.slice(1, end);
+      if (!host || (rest !== '' && !rest.startsWith(':'))) {
+        fail('Origin hostname is invalid.');
+        return;
+      }
+      port = rest.startsWith(':') ? rest.slice(1) : null;
+      if (!/^[0-9a-f:.]+$/i.test(host)) {
+        fail('Origin hostname is invalid.');
+        return;
+      }
+    } else {
+      const colon = authority.lastIndexOf(':');
+      if (colon !== -1 && /^\d+$/.test(authority.slice(colon + 1))) {
+        host = authority.slice(0, colon);
+        port = authority.slice(colon + 1);
+      }
+      if (!isIpv4(host) && !isDnsName(host)) {
+        fail('Origin hostname is invalid.');
+        return;
+      }
+    }
+    if (port !== null) {
+      const number = Number(port);
+      if (!Number.isInteger(number) || number < 1 || number > 65535) {
+        fail('Origin port must be between 1 and 65535.');
+      }
+    }
+  });
+
 export const NodeSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -41,6 +133,7 @@ export const NodeSchema = z.object({
   lastSeenAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  quickTunnel: QuickTunnelSchema,
 });
 export type Node = z.infer<typeof NodeSchema>;
 
@@ -77,6 +170,16 @@ export const NodeTestResultSchema = SshTestResultSchema;
 export type NodeTestResult = z.infer<typeof NodeTestResultSchema>;
 
 /** Options controlling how a node is provisioned. */
+/** Body of POST /nodes/:id/connector/:action. Named and Quick do not share a default. */
+export const ConnectorInputSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('named') }),
+  z.object({
+    type: z.literal('quick'),
+    origin: QuickOriginSchema.optional(),
+  }),
+]);
+export type ConnectorInput = z.infer<typeof ConnectorInputSchema>;
+
 export const ProvisionNodeSchema = z.object({
   /** Install cloudflared as a persistent OS service (recommended). Requires sudo on remote. */
   installService: z.boolean().default(true),

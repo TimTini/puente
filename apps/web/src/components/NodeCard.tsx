@@ -25,6 +25,7 @@ import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { Spinner } from './ui/spinner';
 import { Field, StatusBadge } from './ui/extras';
+import { QuickTunnelPanel } from './QuickTunnelPanel';
 import {
   Dialog,
   DialogContent,
@@ -140,6 +141,8 @@ export function NodeCard({
         )}
         {testResult && <div className="text-sm text-muted-foreground">{testResult}</div>}
 
+        <QuickTunnelPanel node={node} />
+
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           {!provisioned && (
@@ -178,7 +181,7 @@ export function NodeCard({
                   size="sm"
                   variant="outline"
                   loading={m.connector.isPending}
-                  onClick={() => m.connector.mutate({ id: node.id, action: 'stop' })}
+                  onClick={() => m.connector.mutate({ id: node.id, action: 'stop', type: 'named' })}
                 >
                   {!m.connector.isPending && <Square className="size-3.5" />}
                   Stop
@@ -188,7 +191,9 @@ export function NodeCard({
                   size="sm"
                   variant="outline"
                   loading={m.connector.isPending}
-                  onClick={() => m.connector.mutate({ id: node.id, action: 'start' })}
+                  onClick={() =>
+                    m.connector.mutate({ id: node.id, action: 'start', type: 'named' })
+                  }
                 >
                   {!m.connector.isPending && <Play className="size-3.5" />}
                   Start
@@ -197,7 +202,9 @@ export function NodeCard({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                onClick={() => m.connector.mutate({ id: node.id, action: 'restart' })}
+                onClick={() =>
+                  m.connector.mutate({ id: node.id, action: 'restart', type: 'named' })
+                }
                 title="Restart connector"
               >
                 <RotateCw className="size-3.5" />

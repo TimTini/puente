@@ -2,6 +2,7 @@ import type {
   ConnectorRunState,
   Node as PuenteNode,
   ProvisionState,
+  QuickState,
   RouteHealth,
   RouteStatus,
   TunnelStatus,
@@ -33,6 +34,21 @@ export function connectorStateMeta(s: ConnectorRunState): StatusMeta {
   switch (s) {
     case 'running':
       return { label: 'Running', tone: 'ok' };
+    case 'stopped':
+      return { label: 'Stopped', tone: 'neutral' };
+    case 'error':
+      return { label: 'Error', tone: 'danger' };
+    default:
+      return { label: 'Unknown', tone: 'neutral' };
+  }
+}
+
+export function quickStateMeta(s: QuickState): StatusMeta {
+  switch (s) {
+    case 'running':
+      return { label: 'Running', tone: 'ok' };
+    case 'starting':
+      return { label: 'Starting', tone: 'brand' };
     case 'stopped':
       return { label: 'Stopped', tone: 'neutral' };
     case 'error':

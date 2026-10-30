@@ -3,6 +3,16 @@ import type { ConnectorRunState } from '@puente/shared';
 import { CommandExecutor } from '../../common/executor';
 import { shq } from '../../common/shell';
 import { DATA_DIR } from '../../config/paths';
+import {
+  QUICK_DIR_SEGMENT,
+  inspectQuickTunnel,
+  isNamedConnectorArgs,
+  startQuickTunnel,
+  stopQuickTunnel,
+  type QuickRunOptions,
+  type QuickRuntime,
+  type QuickStopResult,
+} from './quick-tunnel';
 
 export interface Target {
   exec: CommandExecutor;
@@ -29,10 +39,17 @@ const RELEASE_BASE = 'https://github.com/cloudflare/cloudflared/releases/latest/
  * `pgrep -x` matches the executable name instead, which for the carrier is `bash` — no command
  * line involved, so no way to match itself. Each candidate is then confirmed by reading back
  * its own arguments by pid, which likewise only ever inspects that one process.
+ *
+ * Quick processes live under `/puente-quick/` and are skipped here. A cloudflared the user
+ * started themselves with `tunnel run` has the same arguments as Puente's named connector, so
+ * named stop still signals that process. Quick stop does not use this function.
  */
-const CONNECTOR_PIDS =
+export const CONNECTOR_PIDS =
   'connector_pids() { for p in $(pgrep -x cloudflared 2>/dev/null); do ' +
-  'case "$(ps -o args= -p "$p" 2>/dev/null)" in *"tunnel run"*) echo "$p";; esac; done; }';
+  'args=$(ps -o args= -p "$p" 2>/dev/null); ' +
+  `case "$args" in *"/${QUICK_DIR_SEGMENT}/"*) ;; *"tunnel run"*) echo "$p";; esac; done; }`;
+
+export { isNamedConnectorArgs };
 
 /** Stop every connector on the target, by pid — `pkill -f` would take the calling shell with it. */
 const KILL_CONNECTORS = `${CONNECTOR_PIDS}; p=$(connector_pids); [ -n "$p" ] && kill $p 2>/dev/null; true`;
@@ -212,5 +229,29 @@ export class CloudflaredService {
     if (out.includes('inactive')) return 'stopped';
     if (out.includes('active')) return 'running';
     return 'unknown';
+  }
+
+  /** Quick Tunnel. Does not install a service and does not call the Cloudflare API. */
+  startQuick(
+    target: Target,
+    nodeId: string,
+    origin: string,
+    opts?: QuickRunOptions,
+  ): Promise<QuickRuntime> {
+    return this.resolveCmd(target).then((cmd) =>
+      startQuickTunnel(target, nodeId, origin, cmd, opts),
+    );
+  }
+
+  stopQuick(
+    target: Target,
+    runtime: QuickRuntime,
+    opts?: QuickRunOptions,
+  ): Promise<QuickStopResult> {
+    return stopQuickTunnel(target, runtime, opts);
+  }
+
+  inspectQuick(target: Target, runtime: QuickRuntime): Promise<QuickRuntime> {
+    return inspectQuickTunnel(target, runtime);
   }
 }

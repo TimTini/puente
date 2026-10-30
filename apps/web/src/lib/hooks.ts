@@ -13,6 +13,7 @@ import type {
   CreateWorkspaceInput,
   UpdateAlertChannelInput,
   UpdateWorkspaceInput,
+  ConnectorInput,
   CreateNodeInput,
   CreateRouteInput,
   ProvisionNodeInput,
@@ -356,8 +357,18 @@ export function useNodeMutations() {
   });
 
   const connector = useMutation({
-    mutationFn: (v: { id: string; action: 'start' | 'stop' | 'restart' }) =>
-      api.nodes.connector(v.id, v.action),
+    mutationFn: (v: {
+      id: string;
+      action: 'start' | 'stop' | 'restart';
+      type: ConnectorInput['type'];
+      origin?: string;
+    }) => {
+      const body: ConnectorInput =
+        v.type === 'named'
+          ? { type: 'named' }
+          : { type: 'quick', ...(v.origin ? { origin: v.origin } : {}) };
+      return api.nodes.connector(v.id, v.action, body);
+    },
     onSuccess: () => invalidate(),
     onError: notifyError,
   });

@@ -48,7 +48,8 @@ export function NodesPage() {
       {!cfConnected && (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-warning/12 px-4 py-3">
           <span className="text-sm font-semibold text-warning">
-            Connect Cloudflare before provisioning nodes.
+            Connect Cloudflare before provisioning a named tunnel. Quick Tunnel does not need an
+            account.
           </span>
           <Button asChild size="sm" variant="outline">
             <Link to="/settings">Go to Settings</Link>

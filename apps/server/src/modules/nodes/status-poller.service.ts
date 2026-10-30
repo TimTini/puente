@@ -18,6 +18,9 @@ export class StatusPoller implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    // Hide any Quick URL left in the database until a live check adopts the process.
+    // This does not start a tunnel.
+    this.nodes.quarantineUnreconciledQuick();
     this.schedule();
   }
 

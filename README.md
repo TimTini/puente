@@ -32,7 +32,7 @@ npm install -g puente && puente
 
 - Create & manage **Cloudflare Tunnels** and their ingress rules via the Cloudflare API.
 - Map a local port to a subdomain (`port 7008 → vw.example.com`) — updates ingress **and** DNS automatically.
-- Orchestrate `cloudflared` on the **local machine and remote nodes over SSH** (auto-install, service setup, start/stop).
+- Orchestrate `cloudflared` on the **local machine and remote nodes over SSH** (auto-install, service setup, start/stop), including one temporary Quick Tunnel per machine without a Cloudflare token.
 - One-click **passwordless SSH** bootstrap for new hosts.
 - Live status via Server-Sent Events, encrypted secrets at rest, single-command install.
 

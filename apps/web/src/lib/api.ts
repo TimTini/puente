@@ -5,6 +5,7 @@ import {
   type AuthToken,
   type CloudflareConnection,
   type CloudflareZone,
+  type ConnectorInput,
   type CreateNodeInput,
   type CreateRouteInput,
   type ActivateLicenseInput,
@@ -165,8 +166,8 @@ export const api = {
     bootstrap: (id: string, b: SshBootstrapInput) =>
       post<SshTestResult>(`/nodes/${id}/bootstrap`, b),
     provision: (id: string, b: ProvisionNodeInput) => post<PuenteNode>(`/nodes/${id}/provision`, b),
-    connector: (id: string, action: 'start' | 'stop' | 'restart') =>
-      post<PuenteNode>(`/nodes/${id}/connector/${action}`),
+    connector: (id: string, action: 'start' | 'stop' | 'restart', body: ConnectorInput) =>
+      post<PuenteNode>(`/nodes/${id}/connector/${action}`, body),
     refresh: (id: string) => post<PuenteNode>(`/nodes/${id}/refresh`),
   },
   routes: {

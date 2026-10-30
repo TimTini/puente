@@ -105,6 +105,6 @@ export class FleetService {
   private apply(operation: FleetOperation, nodeId: string): Promise<unknown> {
     return operation === 'upgrade'
       ? this.nodes.upgradeConnector(nodeId)
-      : this.nodes.setConnector(nodeId, 'restart');
+      : this.nodes.setConnector(nodeId, 'restart', { type: 'named' });
   }
 }

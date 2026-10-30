@@ -1,6 +1,13 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import type {
+  ConnectorInput,
   CreateNodeInput,
   Node,
   ProvisionNodeInput,
@@ -23,10 +30,19 @@ import { newId } from '../../common/ids';
 import { nowMs } from '../../common/time';
 import { toNodeDto } from './node.mapper';
 import type { CommandExecutor } from '../../common/executor';
+import {
+  blankQuick,
+  coerceQuick,
+  scrubOrigin,
+  type QuickRuntime,
+} from '../cloudflared/quick-tunnel';
 
 @Injectable()
 export class NodesService {
   private readonly logger = new Logger(NodesService.name);
+  /** Serializes Quick start/stop/restart per node so two clicks cannot spawn two processes. */
+  private readonly quickTail = new Map<string, Promise<unknown>>();
+  private readonly quickDeleting = new Set<string>();
 
   constructor(
     private readonly dbs: DbService,
@@ -150,6 +166,13 @@ export class NodesService {
 
   async remove(id: string): Promise<void> {
     const row = this.getRow(id);
+    this.quickDeleting.add(id);
+    try {
+      await this.ensureQuickStoppedForDelete(row);
+    } catch (err) {
+      this.quickDeleting.delete(id);
+      throw err;
+    }
     // Best-effort teardown, but only of a connector puente actually put there. Without a tunnel
     // this node was never provisioned, and tearing down anyway ran `cloudflared service uninstall`
     // on the machine — removing a connector someone else installed, for a node that had never
@@ -170,6 +193,7 @@ export class NodesService {
         .catch((e) => this.logger.warn(`Tunnel delete failed: ${String(e)}`));
     }
     this.db.delete(nodes).where(eq(nodes.id, id)).run();
+    this.quickDeleting.delete(id);
     this.events.info('node.delete', `Removed node "${row.name}"`, { nodeId: id });
     this.bus.emit({ type: 'node.deleted', nodeId: id });
   }
@@ -347,7 +371,16 @@ export class NodesService {
     return this.emitUpdated(id);
   }
 
-  async setConnector(id: string, action: 'start' | 'stop' | 'restart'): Promise<Node> {
+  async setConnector(
+    id: string,
+    action: 'start' | 'stop' | 'restart',
+    input: ConnectorInput,
+  ): Promise<Node> {
+    if (input.type === 'quick') return this.setQuickConnector(id, action, input.origin);
+    return this.setNamedConnector(id, action);
+  }
+
+  private async setNamedConnector(id: string, action: 'start' | 'stop' | 'restart'): Promise<Node> {
     const row = this.getRow(id);
     await this.withTarget(row, async (target) => {
       if (action === 'start' && !row.serviceInstalled && row.tunnelId) {
@@ -373,6 +406,14 @@ export class NodesService {
    */
   async upgradeConnector(id: string): Promise<Node> {
     const row = this.getRow(id);
+    const quick = coerceQuick(row.quickRuntime);
+    if (quick.state === 'running' || quick.state === 'starting' || quick.state === 'unknown') {
+      throw new ConflictException({
+        statusCode: 409,
+        message: 'Stop the Quick Tunnel before updating cloudflared.',
+        code: 'QUICK_RUNNING',
+      });
+    }
     if (!row.tunnelId) {
       throw new BadRequestException(`"${row.name}" has no connector to upgrade yet.`);
     }
@@ -408,22 +449,47 @@ export class NodesService {
         this.logger.warn(`tunnel status refresh failed: ${String(err)}`);
       }
     }
-    // Connector run state (best-effort; remote may be offline).
+    // Connector run state (best-effort; remote may be offline). Quick is checked on the same
+    // connection and never writes the named lastError.
+    const quick = coerceQuick(row.quickRuntime);
     try {
       await this.withTarget(row, async (target) => {
         const state = await this.cloudflared.runState(target);
         this.setState(id, { connectorRunState: state, lastSeenAt: nowMs() });
+        if (this.quickNeedsWatch(quick) && !this.quickTail.has(id)) {
+          const next = await this.cloudflared.inspectQuick(target, quick);
+          this.writeQuickIfSame(id, quick.marker, next);
+        }
       });
     } catch (err) {
       this.setState(id, { connectorRunState: 'unknown' });
+      if (this.quickNeedsWatch(quick) && !this.quickTail.has(id)) {
+        this.writeQuickIfSame(id, quick.marker, { ...quick, state: 'unknown', publicUrl: null });
+      }
       this.logger.debug(`run state check failed for ${row.name}: ${String(err)}`);
     }
     return this.emitUpdated(id);
   }
 
-  /** Lightweight, SSH-free refresh of tunnel status for all provisioned nodes. */
+  /** Named status is the Cloudflare API. Quick status is a separate check of this node's process. */
   async pollTunnelStatuses(): Promise<void> {
-    if (!this.settings.isCloudflareConnected()) return;
+    if (this.settings.isCloudflareConnected()) {
+      await this.pollNamedTunnels();
+    }
+    await this.pollQuickTunnels();
+  }
+
+  /** A restart must not keep showing a Quick URL until this process has seen the machine. */
+  quarantineUnreconciledQuick(): void {
+    for (const row of this.db.select().from(nodes).all()) {
+      const runtime = coerceQuick(row.quickRuntime);
+      if (runtime.state === 'running' || runtime.state === 'starting') {
+        this.setState(row.id, { quickRuntime: { ...runtime, state: 'unknown', publicUrl: null } });
+      }
+    }
+  }
+
+  private async pollNamedTunnels(): Promise<void> {
     const provisioned = this.db
       .select()
       .from(nodes)
@@ -455,6 +521,248 @@ export class NodesService {
         /* transient; try again next tick */
       }
     }
+  }
+
+  private async pollQuickTunnels(): Promise<void> {
+    for (const row of this.db.select().from(nodes).all()) {
+      const before = coerceQuick(row.quickRuntime);
+      if (!this.quickNeedsWatch(before)) continue;
+      if (this.quickTail.has(row.id)) continue;
+      try {
+        await this.reconcileQuick(row.id);
+        const after = coerceQuick(this.getRow(row.id).quickRuntime);
+        if (
+          after.state !== before.state ||
+          after.publicUrl !== before.publicUrl ||
+          after.lastError !== before.lastError
+        ) {
+          this.emitUpdated(row.id);
+        }
+      } catch (err) {
+        this.logger.debug(`quick poll failed for ${row.name}: ${String(err)}`);
+      }
+    }
+  }
+
+  private async setQuickConnector(
+    id: string,
+    action: 'start' | 'stop' | 'restart',
+    origin: string | undefined,
+  ): Promise<Node> {
+    return this.enqueueQuick(id, async () => {
+      if (this.quickDeleting.has(id)) {
+        throw new ConflictException({
+          statusCode: 409,
+          message: 'This node is being deleted.',
+          code: 'QUICK_DELETE_BLOCKED',
+        });
+      }
+      let row = this.getRow(id);
+      if (this.quickNeedsWatch(coerceQuick(row.quickRuntime))) {
+        await this.reconcileQuick(id);
+        row = this.getRow(id);
+      }
+      const runtime = coerceQuick(row.quickRuntime);
+      if ((action === 'start' || action === 'restart') && runtime.state === 'unknown') {
+        throw new ConflictException({
+          statusCode: 409,
+          message: 'Puente cannot see this node, so it will not start another Quick Tunnel.',
+          code: 'QUICK_UNRESOLVED',
+        });
+      }
+      if (action === 'stop') return this.stopQuick(row);
+      const nextOrigin = origin ?? row.quickOrigin ?? undefined;
+      if (!nextOrigin) {
+        throw new BadRequestException('Enter an http(s) origin before starting a Quick Tunnel.');
+      }
+      if (action === 'start' && runtime.marker && runtime.state !== 'stopped') {
+        if (runtime.state === 'running' && (row.quickOrigin ?? undefined) === nextOrigin) {
+          return this.get(id);
+        }
+        throw new ConflictException({
+          statusCode: 409,
+          message:
+            runtime.state === 'running'
+              ? 'Stop the Quick Tunnel before changing its origin.'
+              : 'Stop the Quick Tunnel before starting another one.',
+          code: 'QUICK_ORIGIN_BUSY',
+        });
+      }
+      if (action === 'restart' && (runtime.state === 'running' || runtime.marker)) {
+        this.setState(id, {
+          quickRuntime: { ...runtime, state: 'starting', publicUrl: null, pid: null },
+        });
+        await this.stopOwnedQuick(this.getRow(id));
+        row = this.getRow(id);
+      }
+      return this.launchQuick(row, nextOrigin);
+    });
+  }
+
+  private async launchQuick(row: NodeRow, origin: string): Promise<Node> {
+    try {
+      await this.withTarget(row, async (target) => {
+        const installed = await this.cloudflared.ensureInstalled(target, row.cloudflaredVersion);
+        if (installed.version) this.setState(row.id, { cloudflaredVersion: installed.version });
+        const runtime = await this.cloudflared.startQuick(target, row.id, origin, {
+          onPrepared: (prepared) => {
+            this.setState(row.id, { quickOrigin: origin, quickRuntime: prepared });
+          },
+        });
+        this.setState(row.id, { quickOrigin: origin, quickRuntime: runtime });
+        if (runtime.state === 'error') {
+          throw new Error(runtime.lastError ?? 'Quick Tunnel failed.');
+        }
+      });
+    } catch (err) {
+      const message = scrubOrigin(err instanceof Error ? err.message : String(err), origin);
+      const current = coerceQuick(this.getRow(row.id).quickRuntime);
+      if (current.state !== 'unknown') {
+        this.setState(row.id, {
+          quickRuntime: { ...current, state: 'error', publicUrl: null, lastError: message },
+        });
+      }
+      this.events.error('node.quick', `Quick Tunnel on "${row.name}" failed`, { nodeId: row.id });
+      this.emitUpdated(row.id);
+      throw new BadRequestException(message);
+    }
+    const saved = coerceQuick(this.getRow(row.id).quickRuntime);
+    if (saved.state === 'unknown') {
+      this.events.warn('node.quick', `Quick Tunnel on "${row.name}" could not be confirmed`, {
+        nodeId: row.id,
+      });
+    } else {
+      this.events.success('node.quick', `Quick Tunnel updated on "${row.name}"`, {
+        nodeId: row.id,
+      });
+    }
+    return this.emitUpdated(row.id);
+  }
+
+  private async stopQuick(row: NodeRow): Promise<Node> {
+    const runtime = coerceQuick(row.quickRuntime);
+    if (!runtime.marker) {
+      this.setState(row.id, { quickRuntime: blankQuick({ state: 'stopped' }) });
+      return this.emitUpdated(row.id);
+    }
+    await this.stopOwnedQuick(row);
+    this.events.info('node.quick', `Quick Tunnel stopped on "${row.name}"`, { nodeId: row.id });
+    return this.emitUpdated(row.id);
+  }
+
+  private async stopOwnedQuick(row: NodeRow): Promise<void> {
+    const runtime = coerceQuick(row.quickRuntime);
+    try {
+      await this.withTarget(row, async (target) => {
+        const result = await this.cloudflared.stopQuick(target, runtime);
+        if (result === 'mismatch') {
+          this.setState(row.id, {
+            quickRuntime: blankQuick({
+              state: 'error',
+              lastError: 'The recorded pid belongs to a different process. It was left running.',
+            }),
+          });
+          throw new ConflictException({
+            statusCode: 409,
+            message: 'The recorded process is not this Quick Tunnel. It was left running.',
+            code: 'QUICK_OWNERSHIP',
+          });
+        }
+        this.setState(row.id, { quickRuntime: blankQuick({ state: 'stopped' }) });
+      });
+    } catch (err) {
+      if (err instanceof ConflictException) throw err;
+      const current = coerceQuick(this.getRow(row.id).quickRuntime);
+      this.setState(row.id, { quickRuntime: { ...current, state: 'unknown', publicUrl: null } });
+      throw new ConflictException({
+        statusCode: 409,
+        message: `Puente lost contact with "${row.name}" while stopping its Quick Tunnel.`,
+        code: 'QUICK_UNRESOLVED',
+      });
+    }
+  }
+
+  private async ensureQuickStoppedForDelete(row: NodeRow): Promise<void> {
+    try {
+      await this.enqueueQuick(row.id, async () => {
+        const current = this.getRow(row.id);
+        const runtime = coerceQuick(current.quickRuntime);
+        if (
+          !runtime.marker &&
+          runtime.state !== 'unknown' &&
+          runtime.state !== 'running' &&
+          runtime.state !== 'starting'
+        ) {
+          return;
+        }
+        await this.stopOwnedQuick(current);
+      });
+    } catch (err) {
+      if (err instanceof ConflictException && this.ownershipCleared(row.id)) return;
+      const message =
+        err instanceof ConflictException
+          ? (err.getResponse() as { message?: string }).message
+          : `Cannot reach "${row.name}" to stop its Quick Tunnel.`;
+      throw new ConflictException({
+        statusCode: 409,
+        message: `${message ?? 'Quick Tunnel cleanup failed.'} The node was kept.`,
+        code: 'QUICK_DELETE_BLOCKED',
+      });
+    }
+  }
+
+  private ownershipCleared(id: string): boolean {
+    const runtime = coerceQuick(this.getRow(id).quickRuntime);
+    return runtime.state === 'error' && !runtime.marker;
+  }
+
+  private async reconcileQuick(id: string): Promise<void> {
+    const row = this.getRow(id);
+    const runtime = coerceQuick(row.quickRuntime);
+    if (!runtime.marker || !runtime.runtimeDir) {
+      if (runtime.publicUrl || runtime.state === 'running' || runtime.state === 'starting') {
+        this.setState(id, { quickRuntime: blankQuick({ state: 'stopped' }) });
+      }
+      return;
+    }
+    const marker = runtime.marker;
+    try {
+      await this.withTarget(row, async (target) => {
+        const next = await this.cloudflared.inspectQuick(target, runtime);
+        this.writeQuickIfSame(id, marker, next);
+      });
+    } catch {
+      this.writeQuickIfSame(id, marker, { ...runtime, state: 'unknown', publicUrl: null });
+    }
+  }
+
+  /** A slow inspect must not replace a runtime a start or stop wrote in the meantime. */
+  private writeQuickIfSame(id: string, marker: string | null, next: QuickRuntime): void {
+    const current = coerceQuick(this.getRow(id).quickRuntime);
+    if ((current.marker ?? null) !== (marker ?? null)) return;
+    this.setState(id, { quickRuntime: next });
+  }
+
+  private quickNeedsWatch(runtime: QuickRuntime): boolean {
+    return (
+      runtime.state === 'running' ||
+      runtime.state === 'starting' ||
+      runtime.state === 'unknown' ||
+      Boolean(runtime.marker)
+    );
+  }
+
+  private enqueueQuick<T>(id: string, op: () => Promise<T>): Promise<T> {
+    const prev = this.quickTail.get(id) ?? Promise.resolve();
+    const run = prev.catch(() => undefined).then(op);
+    this.quickTail.set(id, run);
+    // finally() rejects again; swallow that copy so a handled conflict is not an unhandled rejection.
+    void run
+      .finally(() => {
+        if (this.quickTail.get(id) === run) this.quickTail.delete(id);
+      })
+      .catch(() => undefined);
+    return run;
   }
 
   // --- helpers --------------------------------------------------------------

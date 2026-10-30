@@ -1,6 +1,7 @@
 import type { Node, SshConfig, TunnelStatus } from '@puente/shared';
 import type { NodeRow } from '../../db/schema';
 import { toIso, toIsoStrict } from '../../common/time';
+import { coerceQuick, matchTryCloudflareUrl } from '../cloudflared/quick-tunnel';
 
 export function toNodeDto(row: NodeRow): Node {
   const ssh: SshConfig | null =
@@ -35,5 +36,18 @@ export function toNodeDto(row: NodeRow): Node {
     lastSeenAt: toIso(row.lastSeenAt),
     createdAt: toIsoStrict(row.createdAt),
     updatedAt: toIsoStrict(row.updatedAt),
+    quickTunnel: quickTunnelOf(row),
+  };
+}
+
+function quickTunnelOf(row: NodeRow): Node['quickTunnel'] {
+  const runtime = coerceQuick(row.quickRuntime);
+  const url = runtime.state === 'running' ? matchTryCloudflareUrl(runtime.publicUrl ?? '') : null;
+  return {
+    origin: row.quickOrigin ?? null,
+    url,
+    state: runtime.state,
+    startedAt: runtime.startedAt,
+    lastError: runtime.lastError,
   };
 }
