@@ -6,6 +6,8 @@ import { existsSync } from 'node:fs';
 import { platform } from 'node:os';
 import { bootstrap } from './main';
 import { DATA_DIR, DB_PATH, LOG_PATH } from './config/paths';
+import { resolvePort } from './config/port-registry';
+import { stopForRestart } from './cli-restart';
 import { APP_VERSION } from './config/version';
 import { runLicenseCommand } from './ee/license/license.cli';
 import { runBackupCommand, runRestoreCommand } from './modules/backup/backup.cli';
@@ -20,8 +22,6 @@ import {
   stopDaemon,
   writeState,
 } from './daemon';
-
-const DEFAULT_PORT = Number(process.env.PUENTE_PORT ?? process.env.PORT ?? 5006);
 
 import { bold, cyan, dim, green, red, yellow } from './common/colour';
 
@@ -123,12 +123,18 @@ program
 program
   .command('start', { isDefault: true })
   .description('Start the puente control panel in the background')
-  .option('-p, --port <port>', 'port to listen on', String(DEFAULT_PORT))
+  .option('-p, --port <port>', 'port to listen on')
   .option('--host <host>', 'host to bind', '0.0.0.0')
   .option('--no-open', 'do not open the browser automatically')
   .option('-f, --foreground', 'stay attached to this terminal (Docker, systemd, CI)', false)
-  .action(async (opts: { port: string; host: string; open: boolean; foreground: boolean }) => {
-    const port = Number(opts.port) || DEFAULT_PORT;
+  .action(async (opts: { port?: string; host: string; open: boolean; foreground: boolean }) => {
+    const port = resolvePort(
+      'Puente dashboard',
+      5006,
+      __dirname,
+      process.env,
+      opts.port === undefined ? undefined : Number(opts.port),
+    );
     if (opts.foreground) {
       await startForeground(port, opts.host, opts.open);
       return;
@@ -139,12 +145,18 @@ program
 program
   .command('setup')
   .description('Start the panel and open the guided setup wizard in your browser')
-  .option('-p, --port <port>', 'port to listen on', String(DEFAULT_PORT))
+  .option('-p, --port <port>', 'port to listen on')
   .option('-f, --foreground', 'stay attached to this terminal (Docker, systemd, CI)', false)
-  .action(async (opts: { port: string; foreground: boolean }) => {
+  .action(async (opts: { port?: string; foreground: boolean }) => {
     console.log(dim('\n  Opening the setup wizard — create your admin account, then'));
     console.log(dim('  connect Cloudflare with an API token (scopes shown in the UI).'));
-    const port = Number(opts.port) || DEFAULT_PORT;
+    const port = resolvePort(
+      'Puente dashboard',
+      5006,
+      __dirname,
+      process.env,
+      opts.port === undefined ? undefined : Number(opts.port),
+    );
     if (opts.foreground) {
       await startForeground(port, '0.0.0.0', true);
       return;
@@ -173,12 +185,10 @@ program
   .option('--open', 'open the browser once it is back up', false)
   .action(async (opts: { port?: string; host?: string; open: boolean }) => {
     const previous = readRunningState();
-    const res = await stopDaemon();
+    const { port, host, result: res } = await stopForRestart(opts, previous, __dirname);
     if (res.result !== 'not-running') {
       console.log(dim(`\n  Stopped pid ${res.state.pid}.`));
     }
-    const port = Number(opts.port) || previous?.port || DEFAULT_PORT;
-    const host = opts.host ?? previous?.host ?? '0.0.0.0';
     await startBackground(port, host, opts.open).catch(reportStartFailure);
   });
 

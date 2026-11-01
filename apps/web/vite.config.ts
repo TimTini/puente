@@ -2,8 +2,12 @@ import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { getRegisteredPort, resolvePort } from '../server/src/config/port-registry';
 
-const API_TARGET = process.env.PUENTE_API_TARGET ?? 'http://localhost:5006';
+const PROJECT_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+const API_PORT = resolvePort('Puente dashboard', 5006, PROJECT_ROOT);
+const API_TARGET = process.env.PUENTE_API_TARGET ?? `http://localhost:${API_PORT}`;
+const WEB_PORT = getRegisteredPort('Puente web dev', 5173, PROJECT_ROOT);
 
 // puente is designed to be exposed on your own domains — including its own panel,
 // e.g. through a Cloudflare Tunnel. Vite's dev/preview server blocks requests whose
@@ -28,7 +32,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: WEB_PORT,
     allowedHosts: ALLOWED_HOSTS,
     proxy: {
       '/api': { target: API_TARGET, changeOrigin: true, ws: false },

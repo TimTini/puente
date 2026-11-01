@@ -154,7 +154,7 @@ to `~/.puente/puente.log` (rotated to `puente.log.1` past 5 MB). A second `puent
 detects the running one instead of fighting it for the port; a state file left behind by a
 crash is cleaned up automatically.
 
-Environment variables: `PUENTE_PORT` (default `5006`), `PUENTE_DATA_DIR` (default `~/.puente`).
+Environment variables: `PUENTE_PORT` (then `PORT`; otherwise the `Puente dashboard` row in the local port registry, default `5006`), `PUENTE_PORT_REGISTRY` (optional absolute path to `ports.json` for published installs), and `PUENTE_DATA_DIR` (default `~/.puente`). The registry is discovered beside the `MyGitProject` directory containing a checkout. A present but invalid registry stops implicit startup with an error; an explicit `--port` bypasses registry lookup. The web dev server reads its `Puente web dev` row (default `5173`) and targets the selected dashboard port.
 
 ---
 

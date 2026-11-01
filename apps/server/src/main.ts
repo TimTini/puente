@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ensureDataDir } from './config/paths';
+import { resolvePort } from './config/port-registry';
 
 export interface ServerHandle {
   url: string;
@@ -25,7 +26,7 @@ export async function bootstrap(opts: { port: number; host?: string }): Promise<
 }
 
 if (require.main === module) {
-  const port = Number(process.env.PUENTE_PORT ?? process.env.PORT ?? 5006);
+  const port = resolvePort('Puente dashboard', 5006, __dirname);
   bootstrap({ port }).then((handle) => {
     console.log(`puente server listening on ${handle.url}`);
   });
