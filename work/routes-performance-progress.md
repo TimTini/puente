@@ -18,7 +18,7 @@ Base: `85091bb` on `main`. Scope authorized 2026-11-01: fix two reviewed route b
 
 ## Status
 
-Route fixes, live-update render regression, registry integration, and measured scroll fix verified. User then authorized Mac deployment and system startup without login. Deployment is in progress.
+Route fixes, live-update render regression, registry integration, measured scroll fix, Mac deployment and system LaunchDaemon installation verified. No whole-machine reboot was performed.
 
 ## Frontend performance checkpoint — 2026-11-01
 
@@ -72,3 +72,12 @@ Route fixes, live-update render regression, registry integration, and measured s
 - Live release moved to `/Users/v/MyGitProject/puente/runtime/releases/20261101-35f3afa`, manual background PID 64236 at the checkpoint. All user/workspace/node/static-route counts remain 1. The old helper path above now targets this fixed release, so the user can repeat the same command.
 - Installer has NOT yet completed: no `/Library/LaunchDaemons/io.puente.dashboard.plist` and no system job at the latest check. Awaiting the user to rerun interactive sudo. Do not claim boot/login independence until `launchctl print system/io.puente.dashboard`, plist ownership and HTTP readiness are verified.
 - Source pushed to personal/main through `e81dab4`; concurrent upstream fixes and upgrade-test changes were merged without overwrite. No whole-machine reboot performed.
+
+## Completed Mac activation
+
+- User reran the prepared sudo helper successfully after the SSE fix.
+- Root independently verified `system/io.puente.dashboard` is running: launchd PID 64551 exactly matches the TCP 5006 listener. Process user v, PPID 1; plist `/Library/LaunchDaemons/io.puente.dashboard.plist` is root:wheel 0644, RunAtLoad=true, KeepAlive=true.
+- Program points at Node v24.15.0 and `runtime/releases/20261101-35f3afa/dist/cli.js`, with the existing `.puente/dashboard` data directory and role-based port registry.
+- HTTP `/`, `/nodes`, `/settings`, `/api/setup/status` all 200. Real Brave login session retained; Settings displays v0.3.0 and computes zero backdrop filter regions. Dashboard tab left open for the user.
+- Service runs in the system LaunchDaemon domain, not a login LaunchAgent. FileVault is off. Actual full reboot/logout test not performed; no claim of an observed post-reboot result.
+- Latest offline verification: 29 files / 250 passing tests, 3 POSIX skips on Windows. Production app data counts preserved at one user/workspace/node/static route. Backups and previous release retained.
