@@ -11,6 +11,7 @@ apps/server/dist/
 
 # Local runtime data (never commit secrets/DB)
 .puente/
+/runtime/
 *.sqlite
 *.sqlite-*
 *.db
