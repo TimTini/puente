@@ -135,7 +135,7 @@ describe('startQuickTunnel', () => {
   it('reports an early exit without killing anything else', async () => {
     const noise = 'noise-'.repeat(80);
     const { target: t, exec } = scripted({
-      log: `${noise}cannot execute binary file: Exec format error ${ORIGIN}\n`,
+      log: `${noise}cannot execute binary file:\u0000 Exec format error ${ORIGIN}\n`,
       inspect: 'OWNED \n',
     });
     const runtime = await startQuickTunnel(t, 'node_1', ORIGIN, 'cloudflared', fast);
@@ -146,6 +146,7 @@ describe('startQuickTunnel', () => {
     expect(runtime.lastError).toContain('http://127.0.0.1:8080/health');
     expect(runtime.lastError).not.toContain('token=secret');
     expect(runtime.lastError).not.toContain(noise);
+    expect(runtime.lastError).not.toContain('\u0000');
     expect(runtime.marker).toHaveLength(32);
     expect(runtime.runtimeDir).toContain('/puente-quick/');
     expect(exec.commands.some((command) => /kill -TERM|kill -KILL/.test(command))).toBe(false);
