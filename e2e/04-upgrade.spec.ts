@@ -53,6 +53,9 @@ function seedLegacyDatabase(dir: string): void {
      VALUES ('route_legacy', 'node_legacy', 'app.northwind.example', 'app', 'zone_legacy',
              'northwind.example', ?, 1, 'active', 'healthy', ?, ?)`,
   ).run(JSON.stringify({ protocol: 'http', host: 'localhost', port: 3000 }), t, t);
+  // 0.2.0 stops here. Quick Tunnel columns are a one-shot migration, not applied on boot.
+  db.exec('ALTER TABLE nodes ADD COLUMN quick_origin TEXT');
+  db.exec('ALTER TABLE nodes ADD COLUMN quick_runtime TEXT');
   db.close();
 }
 
@@ -61,22 +64,32 @@ test.beforeAll(async () => {
   mkdirSync(dataDir, { recursive: true });
   seedLegacyDatabase(dataDir);
 
+  let log = '';
   server = spawn(
     process.execPath,
     [CLI, 'start', '--foreground', '--port', String(PORT), '--host', '127.0.0.1', '--no-open'],
-    { env: { ...process.env, PUENTE_DATA_DIR: dataDir }, stdio: 'ignore' },
+    { env: { ...process.env, PUENTE_DATA_DIR: dataDir }, stdio: ['ignore', 'pipe', 'pipe'] },
   );
+  server.stdout?.on('data', (chunk) => {
+    log += chunk;
+  });
+  server.stderr?.on('data', (chunk) => {
+    log += chunk;
+  });
 
   // Wait for it to answer rather than sleeping a fixed amount.
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + 20_000;
   for (;;) {
+    if (server.exitCode !== null) {
+      throw new Error(`the upgraded server exited ${server.exitCode}: ${log}`);
+    }
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/setup/status`);
       if (res.ok) break;
     } catch {
       /* not up yet */
     }
-    if (Date.now() > deadline) throw new Error('the upgraded server never came up');
+    if (Date.now() > deadline) throw new Error(`the upgraded server never came up: ${log}`);
     await new Promise((r) => setTimeout(r, 500));
   }
 });
