@@ -162,6 +162,7 @@ export const api = {
     get: (id: string) => get<PuenteNode>(`/nodes/${id}`),
     create: (b: CreateNodeInput) => post<PuenteNode>('/nodes', b),
     remove: (id: string) => del<{ ok: true }>(`/nodes/${id}`),
+    removeQuick: (id: string) => del<PuenteNode>(`/nodes/${id}/quick-tunnel`),
     test: (id: string) => post<SshTestResult>(`/nodes/${id}/test`),
     bootstrap: (id: string, b: SshBootstrapInput) =>
       post<SshTestResult>(`/nodes/${id}/bootstrap`, b),

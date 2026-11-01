@@ -13,7 +13,7 @@ import type { EventBus } from '../../common/event-bus.service';
 import type { WorkspacesService } from '../workspaces/workspaces.service';
 import type { RoutesService } from '../routes/routes.service';
 import type { SshService } from '../ssh/ssh.service';
-import { blankQuick } from '../cloudflared/quick-tunnel';
+import { blankQuick, type QuickStopResult } from '../cloudflared/quick-tunnel';
 
 const dbs = new DbService();
 const MARKER = 'd'.repeat(32);
@@ -35,7 +35,7 @@ const getTunnelToken = vi.fn();
 const deleteTunnel = vi.fn();
 const getTunnelInfo = vi.fn(async () => null);
 const startQuick = vi.fn();
-const stopQuick = vi.fn(async () => 'stopped' as const);
+const stopQuick = vi.fn(async (): Promise<QuickStopResult> => 'stopped');
 const inspectQuick = vi.fn(async () => blankQuick({ state: 'stopped' }));
 const controlService = vi.fn();
 const ensureInstalled = vi.fn(async () => ({ version: '2026.1.2', installedNow: false }));
@@ -136,9 +136,41 @@ beforeEach(() => {
 
 afterAll(() => {
   dbs.db.delete(nodes).where(eq(nodes.id, 'node_q')).run();
+  dbs.onModuleDestroy();
 });
 
 describe('Quick Tunnel on a node', () => {
+  it('removes a Quick Tunnel origin only after stopping its process, preserving named state', async () => {
+    await svc.setConnector('node_q', 'start', { type: 'quick', origin: ORIGIN });
+    inspectQuick.mockResolvedValue(running);
+    const node = await svc.removeQuick('node_q');
+    expect(stopQuick).toHaveBeenCalledTimes(1);
+    expect(node.quickTunnel).toMatchObject({ state: 'stopped', origin: null, url: null });
+    expect(node.lastError).toBe('named-error');
+    expect(controlService).not.toHaveBeenCalled();
+    expect(deleteTunnel).not.toHaveBeenCalled();
+  });
+
+  it('retains the Quick origin and ownership when removal cannot confirm the process stopped', async () => {
+    await svc.setConnector('node_q', 'start', { type: 'quick', origin: ORIGIN });
+    sshDown = true;
+    await expect(svc.removeQuick('node_q')).rejects.toBeInstanceOf(ConflictException);
+    expect(svc.get('node_q').quickTunnel.origin).toBe(ORIGIN);
+    expect(
+      dbs.db.select().from(nodes).where(eq(nodes.id, 'node_q')).get()?.quickRuntime?.marker,
+    ).toBe(MARKER);
+  });
+
+  it('does not forget an unresolved Quick Tunnel without process identity', async () => {
+    dbs.db
+      .update(nodes)
+      .set({ quickOrigin: ORIGIN, quickRuntime: blankQuick({ state: 'unknown' }) })
+      .where(eq(nodes.id, 'node_q'))
+      .run();
+    await expect(svc.removeQuick('node_q')).rejects.toBeInstanceOf(ConflictException);
+    expect(svc.get('node_q').quickTunnel.origin).toBe(ORIGIN);
+  });
+
   it('starts without calling Cloudflare, and a second start does not spawn again', async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {

@@ -14,19 +14,18 @@ import {
   type Node as PuenteNode,
   type Route as PuenteRoute,
 } from '@puente/shared';
-import {
-  useNodes,
-  useNodeMutations,
-  useRoutes,
-  useRouteMutations,
-  useZones,
-} from '../lib/hooks';
+import { useNodes, useNodeMutations, useRoutes, useRouteMutations, useZones } from '../lib/hooks';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Spinner } from '../components/ui/spinner';
 import { EmptyState, StatusBadge } from '../components/ui/extras';
-import { isListedQuickTunnel, quickStateMeta, routeHealthMeta, routeStatusMeta } from '../lib/status';
+import {
+  isListedQuickTunnel,
+  quickStateMeta,
+  routeHealthMeta,
+  routeStatusMeta,
+} from '../lib/status';
 import { CreateRouteDialog } from '../components/CreateRouteDialog';
 import { cn } from '@/lib/utils';
 
@@ -117,9 +116,9 @@ export function RoutesPage() {
 }
 
 function QuickRow({ node, last }: { node: PuenteNode; last: boolean }) {
-  const { connector } = useNodeMutations();
+  const { connector, removeQuick } = useNodeMutations();
   const quick = node.quickTunnel;
-  const busy = connector.isPending;
+  const busy = connector.isPending || removeQuick.isPending;
   const running = quick.state === 'running' || quick.state === 'starting';
   const url = quick.state === 'running' ? quick.url : null;
 
@@ -203,8 +202,7 @@ function QuickRow({ node, last }: { node: PuenteNode; last: boolean }) {
           variant="ghost"
           className="text-muted-foreground hover:text-destructive"
           loading={busy}
-          disabled={quick.state === 'stopped' && !quick.url}
-          onClick={() => connector.mutate({ id: node.id, action: 'stop', type: 'quick' })}
+          onClick={() => removeQuick.mutate(node.id)}
           title="Remove Temporary URL"
         >
           {!busy && <Trash2 className="size-3.5" />}

@@ -379,7 +379,16 @@ export function useNodeMutations() {
     onError: notifyError,
   });
 
-  return { create, remove, test, bootstrap, provision, connector, refresh };
+  const removeQuick = useMutation({
+    mutationFn: (id: string) => api.nodes.removeQuick(id),
+    onSuccess: () => {
+      invalidate();
+      toast.success('Temporary URL removed');
+    },
+    onError: notifyError,
+  });
+
+  return { create, remove, test, bootstrap, provision, connector, refresh, removeQuick };
 }
 
 // --- Route mutations -------------------------------------------------------

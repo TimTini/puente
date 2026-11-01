@@ -37,10 +37,12 @@ export function CreateRouteDialog({
   defaultZoneId?: string | null;
 }) {
   const provisioned = nodes.filter((n) => n.tunnelId);
-  const selectableNodes = (temporaryMode: boolean) =>
-    temporaryMode ? nodes : provisioned;
-  const [nodeId, setNodeId] = useState(defaultNodeId ?? nodes[0]?.id ?? '');
+  const selectableNodes = (temporaryMode: boolean) => (temporaryMode ? nodes : provisioned);
   const [zoneId, setZoneId] = useState(defaultZoneId ?? zones[0]?.id ?? TEMPORARY_URL);
+  const [nodeId, setNodeId] = useState(() => {
+    const options = selectableNodes(zoneId === TEMPORARY_URL);
+    return options.find((n) => n.id === defaultNodeId)?.id ?? options[0]?.id ?? '';
+  });
   const [subdomain, setSubdomain] = useState('');
   const [protocol, setProtocol] = useState<ServiceProtocol>('http');
   const [host, setHost] = useState('localhost');
@@ -105,8 +107,10 @@ export function CreateRouteDialog({
   };
 
   const canSubmit = temporary
-    ? Boolean(nodeId && Number(port) > 0 && httpCompatible)
-    : Boolean(nodeId && zoneId && subdomain.trim() && Number(port) > 0);
+    ? Boolean(nodeOptions.some((n) => n.id === nodeId) && Number(port) > 0 && httpCompatible)
+    : Boolean(
+        nodeOptions.some((n) => n.id === nodeId) && zone && subdomain.trim() && Number(port) > 0,
+      );
   const busy = temporary ? connector.isPending : create.isPending;
 
   if (nodes.length === 0) {
@@ -141,7 +145,13 @@ export function CreateRouteDialog({
             Domain.
           </p>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setZoneId(TEMPORARY_URL)}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setZoneId(TEMPORARY_URL);
+                setNodeId(nodes.find((n) => n.id === defaultNodeId)?.id ?? nodes[0]?.id ?? '');
+              }}
+            >
               Use Temporary URL
             </Button>
             <Button variant="ghost" onClick={onClose}>
@@ -205,7 +215,11 @@ export function CreateRouteDialog({
           </div>
 
           {!temporary && (
-            <Field label="Subdomain" hint="Use @ to publish on the domain root." htmlFor="subdomain">
+            <Field
+              label="Subdomain"
+              hint="Use @ to publish on the domain root."
+              htmlFor="subdomain"
+            >
               <div className="flex">
                 <Input
                   id="subdomain"

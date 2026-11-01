@@ -95,4 +95,9 @@ export class NodesController {
   refresh(@Param('id') id: string): Promise<Node> {
     return this.nodes.refreshStatus(id);
   }
+
+  @Delete(':id/quick-tunnel')
+  removeQuick(@Param('id') id: string): Promise<Node> {
+    return this.nodes.removeQuick(id);
+  }
 }

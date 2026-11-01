@@ -544,6 +544,37 @@ export class NodesService {
     }
   }
 
+  async removeQuick(id: string): Promise<Node> {
+    return this.enqueueQuick(id, async () => {
+      if (this.quickDeleting.has(id)) {
+        throw new ConflictException('This node is being deleted.');
+      }
+      let row = this.getRow(id);
+      if (this.quickNeedsWatch(coerceQuick(row.quickRuntime))) {
+        await this.reconcileQuick(id);
+        row = this.getRow(id);
+      }
+      const before = coerceQuick(row.quickRuntime);
+      if (before.state === 'unknown' && !before.marker) {
+        throw new ConflictException(
+          'The Quick Tunnel has no process identity. Its configuration was kept.',
+        );
+      }
+      await this.stopQuick(row);
+      const runtime = coerceQuick(this.getRow(id).quickRuntime);
+      if (runtime.state !== 'stopped' || runtime.marker) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'QUICK_UNRESOLVED',
+          message: 'The Quick Tunnel could not be confirmed stopped. Its configuration was kept.',
+        });
+      }
+      this.setState(id, { quickOrigin: null });
+      this.events.info('node.quick', `Quick Tunnel removed on "${row.name}"`, { nodeId: id });
+      return this.emitUpdated(id);
+    });
+  }
+
   private async setQuickConnector(
     id: string,
     action: 'start' | 'stop' | 'restart',
