@@ -1,11 +1,18 @@
-import { Controller, Sse, MessageEvent } from '@nestjs/common';
-import { interval, map, merge, of, Observable } from 'rxjs';
+import { Controller, Sse, MessageEvent, OnModuleDestroy } from '@nestjs/common';
+import { interval, map, merge, of, Observable, Subject, takeUntil } from 'rxjs';
 import type { StreamEvent } from '@puente/shared';
 import { EventBus } from '../../common/event-bus.service';
 
 @Controller('stream')
-export class StreamController {
+export class StreamController implements OnModuleDestroy {
+  private readonly destroy$ = new Subject<void>();
+
   constructor(private readonly bus: EventBus) {}
+
+  onModuleDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
 
   /** Single SSE channel the SPA subscribes to for all live updates. */
   @Sse()
@@ -16,6 +23,9 @@ export class StreamController {
       map<number, StreamEvent>(() => ({ type: 'ping', at: now() })),
     );
     const events$ = this.bus.stream$;
-    return merge(hello$, events$, ping$).pipe(map((e) => ({ data: e }) as MessageEvent));
+    return merge(hello$, events$, ping$).pipe(
+      takeUntil(this.destroy$),
+      map((e) => ({ data: e }) as MessageEvent),
+    );
   }
 }
