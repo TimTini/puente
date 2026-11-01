@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Node as PuenteNode, Route as PuenteRoute, StreamEvent } from '@puente/shared';
 import { streamUrl } from './api';
@@ -15,16 +23,40 @@ export interface ProgressState {
 
 interface LiveContextValue {
   connected: boolean;
-  progress: Record<string, ProgressState>;
 }
 
-const LiveContext = createContext<LiveContextValue>({ connected: false, progress: {} });
+class ProgressStore {
+  private readonly states = new Map<string, ProgressState>();
+  private readonly listeners = new Map<string, Set<() => void>>();
+
+  get(scope: string) {
+    return this.states.get(scope);
+  }
+
+  subscribe(scope: string, listener: () => void) {
+    const listeners = this.listeners.get(scope) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(scope, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.listeners.delete(scope);
+    };
+  }
+
+  set(scope: string, state: ProgressState) {
+    this.states.set(scope, state);
+    this.listeners.get(scope)?.forEach((listener) => listener());
+  }
+}
+
+const LiveContext = createContext<LiveContextValue>({ connected: false });
+const ProgressContext = createContext<ProgressStore | null>(null);
 
 export function LiveProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const { isAuthenticated } = useAuth();
   const [connected, setConnected] = useState(false);
-  const [progress, setProgress] = useState<Record<string, ProgressState>>({});
+  const [progress] = useState(() => new ProgressStore());
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -64,24 +96,25 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           qc.invalidateQueries({ queryKey: qk.events });
           break;
         case 'progress':
-          setProgress((prev) => ({
-            ...prev,
-            [event.scope]: {
-              step: event.step,
-              message: event.message,
-              done: event.done,
-              error: event.error,
-              at: Date.now(),
-            },
-          }));
+          progress.set(event.scope, {
+            step: event.step,
+            message: event.message,
+            done: event.done,
+            error: event.error,
+            at: Date.now(),
+          });
           break;
       }
     };
 
     return () => es.close();
-  }, [isAuthenticated, qc]);
+  }, [isAuthenticated, progress, qc]);
 
-  return <LiveContext.Provider value={{ connected, progress }}>{children}</LiveContext.Provider>;
+  return (
+    <LiveContext.Provider value={{ connected }}>
+      <ProgressContext.Provider value={progress}>{children}</ProgressContext.Provider>
+    </LiveContext.Provider>
+  );
 }
 
 function upsertNode(qc: ReturnType<typeof useQueryClient>, node: PuenteNode) {
@@ -109,5 +142,11 @@ function upsertRoute(qc: ReturnType<typeof useQueryClient>, route: PuenteRoute) 
 
 export const useLive = () => useContext(LiveContext);
 export function useProgress(scope: string): ProgressState | undefined {
-  return useContext(LiveContext).progress[scope];
+  const store = useContext(ProgressContext);
+  const subscribe = useCallback(
+    (listener: () => void) => store?.subscribe(scope, listener) ?? (() => {}),
+    [scope, store],
+  );
+  const getSnapshot = useCallback(() => store?.get(scope), [scope, store]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
