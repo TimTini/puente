@@ -47,8 +47,9 @@ export function Shell() {
   const location = useLocation();
   const title = SECTION_TITLES[location.pathname] ?? 'puente';
 
-  const quickRouteCount = (nodes.data ?? []).filter((n) => isListedQuickTunnel(n.quickTunnel))
-    .length;
+  const quickRouteCount = (nodes.data ?? []).filter((n) =>
+    isListedQuickTunnel(n.quickTunnel),
+  ).length;
   const counts: Record<string, number | undefined> = {
     nodes: nodes.data?.length,
     routes: (routes.data?.length ?? 0) + quickRouteCount,
@@ -58,7 +59,7 @@ export function Shell() {
 
   return (
     <div className="h-screen p-2.5 sm:p-3">
-      <div className="grid h-full grid-cols-1 overflow-hidden rounded-[1.75rem] border border-panel-border bg-panel shadow-[0_24px_70px_-30px_oklch(0.45_0.12_285/0.5)] backdrop-blur-2xl md:grid-cols-[248px_1fr]">
+      <div className="grid h-full grid-cols-1 overflow-hidden rounded-[1.75rem] border border-panel-border bg-panel shadow-[0_24px_70px_-30px_oklch(0.45_0.12_285/0.5)] md:grid-cols-[248px_1fr]">
         {/* Sidebar */}
         <aside className="hidden flex-col gap-1 border-r border-panel-border/70 p-4 md:flex">
           <div className="flex items-center gap-2.5 px-2 pb-4 pt-1">
@@ -163,7 +164,7 @@ export function Shell() {
 
         {/* Main */}
         <div className="flex min-w-0 flex-col overflow-hidden">
-          <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-panel-border/70 bg-panel/80 px-5 py-3 backdrop-blur-xl sm:px-7">
+          <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-panel-border/70 bg-panel/80 px-5 py-3 sm:px-7">
             <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
             <div className="flex-1" />
             <ThemeToggle />
