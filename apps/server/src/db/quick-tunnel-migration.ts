@@ -95,7 +95,9 @@ export async function applyQuickTunnelMigration(
     run();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Migration rolled back. Backup kept at ${backupPath}. ${message}`, { cause: err });
+    throw new Error(`Migration rolled back. Backup kept at ${backupPath}. ${message}`, {
+      cause: err,
+    });
   }
   return missing;
 }

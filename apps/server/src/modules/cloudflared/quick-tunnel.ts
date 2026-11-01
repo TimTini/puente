@@ -93,10 +93,7 @@ const QUICK_EXIT_ERROR = 'cloudflared exited before the Quick Tunnel was ready.'
 const QUICK_EXIT_TAIL = 240;
 
 function earlyExitError(log: string, origin: string): string {
-  const tail = scrubOrigin(log, origin)
-    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
-    .replace(/ +/g, ' ')
-    .trim();
+  const tail = stripControlChars(scrubOrigin(log, origin)).replace(/ +/g, ' ').trim();
   if (!tail) return QUICK_EXIT_ERROR;
   const short = tail.length > QUICK_EXIT_TAIL ? tail.slice(-QUICK_EXIT_TAIL).trim() : tail;
   return short ? `${QUICK_EXIT_ERROR} ${short}` : QUICK_EXIT_ERROR;
@@ -244,12 +241,24 @@ export function parseInspect(stdout: string): QuickInspectInfo {
 const EMPTY_CONFIG =
   '# puente-quick\n# Empty on purpose: a named tunnel config on this machine must not be used.\n';
 
+function isControlChar(code: number): boolean {
+  return code <= 31 || code === 127;
+}
+
 function hasControlChar(value: string): boolean {
   for (let i = 0; i < value.length; i += 1) {
-    const code = value.charCodeAt(i);
-    if (code <= 31 || code === 127) return true;
+    if (isControlChar(value.charCodeAt(i))) return true;
   }
   return false;
+}
+
+function stripControlChars(value: string): string {
+  let cleaned = '';
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i] ?? '';
+    cleaned += isControlChar(char.charCodeAt(0)) ? ' ' : char;
+  }
+  return cleaned;
 }
 
 function assertOrigin(origin: string): void {
