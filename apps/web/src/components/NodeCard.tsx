@@ -25,7 +25,6 @@ import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { Spinner } from './ui/spinner';
 import { Field, StatusBadge } from './ui/extras';
-import { QuickTunnelPanel } from './QuickTunnelPanel';
 import {
   Dialog,
   DialogContent,
@@ -141,8 +140,6 @@ export function NodeCard({
         )}
         {testResult && <div className="text-sm text-muted-foreground">{testResult}</div>}
 
-        <QuickTunnelPanel node={node} />
-
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           {!provisioned && (
@@ -170,12 +167,13 @@ export function NodeCard({
             </>
           )}
 
+          <Button size="sm" onClick={() => onAddRoute(node.id)}>
+            <Plus className="size-3.5" />
+            Add route
+          </Button>
+
           {provisioned && (
             <>
-              <Button size="sm" onClick={() => onAddRoute(node.id)}>
-                <Plus className="size-3.5" />
-                Add route
-              </Button>
               {node.connectorRunState === 'running' ? (
                 <Button
                   size="sm"

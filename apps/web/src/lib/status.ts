@@ -3,6 +3,7 @@ import type {
   Node as PuenteNode,
   ProvisionState,
   QuickState,
+  QuickTunnel,
   RouteHealth,
   RouteStatus,
   TunnelStatus,
@@ -56,6 +57,11 @@ export function quickStateMeta(s: QuickState): StatusMeta {
     default:
       return { label: 'Unknown', tone: 'neutral' };
   }
+}
+
+/** Shown on Routes (and counts) once the node has a Temporary URL row. */
+export function isListedQuickTunnel(q: QuickTunnel): boolean {
+  return q.state !== 'stopped' || Boolean(q.url) || Boolean(q.origin);
 }
 
 export function provisionMeta(s: ProvisionState): StatusMeta {

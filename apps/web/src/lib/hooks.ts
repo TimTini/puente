@@ -399,7 +399,11 @@ export function useRouteMutations() {
 
   const update = useMutation({
     mutationFn: (v: { id: string; input: UpdateRouteInput }) => api.routes.update(v.id, v.input),
-    onSuccess: () => invalidate(),
+    onSuccess: (route, vars) => {
+      invalidate();
+      if (vars.input.enabled === false) toast.success(`Stopped ${route.hostname}`);
+      else if (vars.input.enabled === true) toast.success(`Started ${route.hostname}`);
+    },
     onError: notifyError,
   });
 

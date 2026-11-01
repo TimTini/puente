@@ -10,6 +10,7 @@ import { EmptyState } from '../components/ui/extras';
 import { NodeCard } from '../components/NodeCard';
 import { AddNodeDialog } from '../components/AddNodeDialog';
 import { CreateRouteDialog } from '../components/CreateRouteDialog';
+import { isListedQuickTunnel } from '../lib/status';
 
 export function NodesPage() {
   const nodes = useNodes();
@@ -22,8 +23,13 @@ export function NodesPage() {
   const routeCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const r of routes.data ?? []) map.set(r.nodeId, (map.get(r.nodeId) ?? 0) + 1);
+    for (const n of nodes.data ?? []) {
+      if (isListedQuickTunnel(n.quickTunnel)) {
+        map.set(n.id, (map.get(n.id) ?? 0) + 1);
+      }
+    }
     return map;
-  }, [routes.data]);
+  }, [routes.data, nodes.data]);
 
   const hasLocal = (nodes.data ?? []).some((n) => n.kind === 'local');
   const cfConnected = cf.data?.connected ?? false;

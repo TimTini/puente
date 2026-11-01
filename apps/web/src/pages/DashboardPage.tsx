@@ -15,7 +15,7 @@ import { Button } from '../components/ui/button';
 import { StatusBadge } from '../components/ui/extras';
 import { ConnectCloudflare } from '../components/ConnectCloudflare';
 import { relativeTime } from '../lib/format';
-import { nodeHeadlineMeta, type Tone } from '../lib/status';
+import { isListedQuickTunnel, nodeHeadlineMeta, type Tone } from '../lib/status';
 import { cn } from '@/lib/utils';
 
 export function DashboardPage() {
@@ -27,8 +27,12 @@ export function DashboardPage() {
   const connected = cf.data?.connected ?? false;
   const nodeList = nodes.data ?? [];
   const routeList = routes.data ?? [];
+  const quickRouteCount = nodeList.filter((n) => isListedQuickTunnel(n.quickTunnel)).length;
+  const totalRoutes = routeList.length + quickRouteCount;
   const healthyTunnels = nodeList.filter((n) => n.tunnelStatus === 'healthy').length;
-  const activeRoutes = routeList.filter((r) => r.status === 'active').length;
+  const activeRoutes =
+    routeList.filter((r) => r.status === 'active').length +
+    nodeList.filter((n) => n.quickTunnel.state === 'running').length;
 
   const steps = [
     { label: 'Connect Cloudflare', done: connected },
@@ -36,7 +40,7 @@ export function DashboardPage() {
       label: 'Add & provision a node',
       done: nodeList.some((n) => n.provisionState === 'provisioned'),
     },
-    { label: 'Publish a route', done: routeList.length > 0 },
+    { label: 'Publish a route', done: totalRoutes > 0 },
   ];
   const allDone = steps.every((s) => s.done);
 
@@ -112,7 +116,7 @@ export function DashboardPage() {
         <Stat
           icon={<Waypoints className="size-4" />}
           label="Routes"
-          value={routeList.length}
+          value={totalRoutes}
           sub={`${activeRoutes} active`}
         />
         <Stat

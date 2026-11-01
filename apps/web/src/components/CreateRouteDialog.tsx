@@ -8,7 +8,7 @@ import {
   type Node as PuenteNode,
   type ServiceProtocol,
 } from '@puente/shared';
-import { useRouteMutations } from '../lib/hooks';
+import { useNodeMutations, useRouteMutations } from '../lib/hooks';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Switch } from './ui/switch';
@@ -18,6 +18,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { cn } from '@/lib/utils';
 
 const PROTOCOLS: ServiceProtocol[] = ['http', 'https', 'tcp', 'ssh', 'rdp'];
+/** Sentinel in the Domain select — starts a Quick Tunnel instead of a named route. */
+const TEMPORARY_URL = '__temporary_url__';
 
 export function CreateRouteDialog({
   open,
@@ -35,8 +37,10 @@ export function CreateRouteDialog({
   defaultZoneId?: string | null;
 }) {
   const provisioned = nodes.filter((n) => n.tunnelId);
-  const [nodeId, setNodeId] = useState(defaultNodeId ?? provisioned[0]?.id ?? '');
-  const [zoneId, setZoneId] = useState(defaultZoneId ?? zones[0]?.id ?? '');
+  const selectableNodes = (temporaryMode: boolean) =>
+    temporaryMode ? nodes : provisioned;
+  const [nodeId, setNodeId] = useState(defaultNodeId ?? nodes[0]?.id ?? '');
+  const [zoneId, setZoneId] = useState(defaultZoneId ?? zones[0]?.id ?? TEMPORARY_URL);
   const [subdomain, setSubdomain] = useState('');
   const [protocol, setProtocol] = useState<ServiceProtocol>('http');
   const [host, setHost] = useState('localhost');
@@ -46,7 +50,10 @@ export function CreateRouteDialog({
   const [httpHostHeader, setHttpHostHeader] = useState('');
   const [advanced, setAdvanced] = useState(false);
   const { create } = useRouteMutations();
+  const { connector } = useNodeMutations();
 
+  const temporary = zoneId === TEMPORARY_URL;
+  const nodeOptions = selectableNodes(temporary);
   const zone = zones.find((z) => z.id === zoneId);
   const hostname = useMemo(
     () => (zone ? computeHostname(subdomain || 'sub', zone.name) : ''),
@@ -56,8 +63,21 @@ export function CreateRouteDialog({
     () => buildServiceUrl({ protocol, host, port: Number(port) || 0 }),
     [protocol, host, port],
   );
+  const httpCompatible = protocol === 'http' || protocol === 'https';
 
   const submit = () => {
+    if (temporary) {
+      connector.mutate(
+        { id: nodeId, action: 'start', type: 'quick', origin: serviceUrl },
+        {
+          onSuccess: () => {
+            setPort('');
+            onClose();
+          },
+        },
+      );
+      return;
+    }
     const input: CreateRouteInput = {
       nodeId,
       zoneId,
@@ -84,9 +104,12 @@ export function CreateRouteDialog({
     });
   };
 
-  const canSubmit = Boolean(nodeId && zoneId && subdomain.trim() && Number(port) > 0);
+  const canSubmit = temporary
+    ? Boolean(nodeId && Number(port) > 0 && httpCompatible)
+    : Boolean(nodeId && zoneId && subdomain.trim() && Number(port) > 0);
+  const busy = temporary ? connector.isPending : create.isPending;
 
-  if (provisioned.length === 0) {
+  if (nodes.length === 0) {
     return (
       <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
         <DialogContent className="sm:max-w-md">
@@ -94,9 +117,33 @@ export function CreateRouteDialog({
             <DialogTitle>Publish a route</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            You need at least one provisioned node before publishing a route.
+            Add a node before publishing a temporary URL or a custom domain route.
           </p>
           <DialogFooter>
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  if (!temporary && provisioned.length === 0) {
+    return (
+      <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Publish a route</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Provision a named tunnel before publishing a custom domain, or choose Temporary URL in
+            Domain.
+          </p>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setZoneId(TEMPORARY_URL)}>
+              Use Temporary URL
+            </Button>
             <Button variant="ghost" onClick={onClose}>
               Close
             </Button>
@@ -121,7 +168,7 @@ export function CreateRouteDialog({
                   <SelectValue placeholder="Select a node" />
                 </SelectTrigger>
                 <SelectContent>
-                  {provisioned.map((n) => (
+                  {nodeOptions.map((n) => (
                     <SelectItem key={n.id} value={n.id}>
                       {n.name}
                     </SelectItem>
@@ -130,11 +177,23 @@ export function CreateRouteDialog({
               </Select>
             </Field>
             <Field label="Domain">
-              <Select value={zoneId} onValueChange={setZoneId}>
+              <Select
+                value={zoneId}
+                onValueChange={(value) => {
+                  setZoneId(value);
+                  if (value === TEMPORARY_URL) {
+                    const stillValid = nodes.some((n) => n.id === nodeId);
+                    if (!stillValid) setNodeId(nodes[0]?.id ?? '');
+                  } else if (!provisioned.some((n) => n.id === nodeId)) {
+                    setNodeId(provisioned[0]?.id ?? nodeId);
+                  }
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select a domain" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={TEMPORARY_URL}>Temporary URL</SelectItem>
                   {zones.map((z) => (
                     <SelectItem key={z.id} value={z.id}>
                       {z.name}
@@ -145,21 +204,30 @@ export function CreateRouteDialog({
             </Field>
           </div>
 
-          <Field label="Subdomain" hint="Use @ to publish on the domain root." htmlFor="subdomain">
-            <div className="flex">
-              <Input
-                id="subdomain"
-                value={subdomain}
-                onChange={(e) => setSubdomain(e.target.value)}
-                placeholder="vw"
-                autoFocus
-                className="rounded-r-none"
-              />
-              <span className="inline-flex items-center whitespace-nowrap rounded-r-md border border-l-0 border-input bg-muted px-3 text-sm text-muted-foreground">
-                .{zone?.name ?? 'example.com'}
-              </span>
-            </div>
-          </Field>
+          {!temporary && (
+            <Field label="Subdomain" hint="Use @ to publish on the domain root." htmlFor="subdomain">
+              <div className="flex">
+                <Input
+                  id="subdomain"
+                  value={subdomain}
+                  onChange={(e) => setSubdomain(e.target.value)}
+                  placeholder="vw"
+                  autoFocus
+                  className="rounded-r-none"
+                />
+                <span className="inline-flex items-center whitespace-nowrap rounded-r-md border border-l-0 border-input bg-muted px-3 text-sm text-muted-foreground">
+                  .{zone?.name ?? 'example.com'}
+                </span>
+              </div>
+            </Field>
+          )}
+
+          {temporary && (
+            <p className="text-sm text-muted-foreground">
+              Creates a trycloudflare.com link for this service. No Cloudflare domain needed. Only
+              HTTP and HTTPS origins are supported.
+            </p>
+          )}
 
           <div className="grid gap-3" style={{ gridTemplateColumns: '120px 1fr 100px' }}>
             <Field label="Protocol">
@@ -195,21 +263,23 @@ export function CreateRouteDialog({
             </Field>
           </div>
 
-          <div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="-ml-2"
-              onClick={() => setAdvanced((a) => !a)}
-            >
-              <ChevronDown
-                className={cn('size-3.5 transition-transform', advanced && 'rotate-180')}
-              />
-              Advanced options
-            </Button>
-          </div>
+          {!temporary && (
+            <div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="-ml-2"
+                onClick={() => setAdvanced((a) => !a)}
+              >
+                <ChevronDown
+                  className={cn('size-3.5 transition-transform', advanced && 'rotate-180')}
+                />
+                Advanced options
+              </Button>
+            </div>
+          )}
 
-          {advanced && (
+          {!temporary && advanced && (
             <div className="flex flex-col gap-3 rounded-xl bg-muted/60 p-4">
               <Field
                 label="Path (regex)"
@@ -250,7 +320,7 @@ export function CreateRouteDialog({
           <div className="flex flex-wrap items-center gap-3 rounded-xl bg-primary/10 p-4 font-mono text-sm">
             <span className="flex items-center gap-1.5 font-semibold text-primary">
               <Globe className="size-4" />
-              {hostname || 'sub.example.com'}
+              {temporary ? 'Temporary URL' : hostname || 'sub.example.com'}
             </span>
             <ArrowRight className="size-4 text-muted-foreground" />
             <span>{serviceUrl}</span>
@@ -261,8 +331,8 @@ export function CreateRouteDialog({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={submit} loading={create.isPending} disabled={!canSubmit}>
-            Publish
+          <Button onClick={submit} loading={busy} disabled={!canSubmit}>
+            {temporary ? 'Start Temporary URL' : 'Publish'}
           </Button>
         </DialogFooter>
       </DialogContent>

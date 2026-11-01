@@ -14,6 +14,7 @@ import { useAuth } from '../lib/auth';
 import { useLive } from '../lib/live';
 import { useNodes, useRoutes, useSwitchWorkspace, useWorkspaces } from '../lib/hooks';
 import { getWorkspaceId } from '../lib/workspace';
+import { isListedQuickTunnel } from '../lib/status';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { ThemeToggle } from './theme';
 import { Avatar, AvatarFallback } from './ui/avatar';
@@ -46,9 +47,11 @@ export function Shell() {
   const location = useLocation();
   const title = SECTION_TITLES[location.pathname] ?? 'puente';
 
+  const quickRouteCount = (nodes.data ?? []).filter((n) => isListedQuickTunnel(n.quickTunnel))
+    .length;
   const counts: Record<string, number | undefined> = {
     nodes: nodes.data?.length,
-    routes: routes.data?.length,
+    routes: (routes.data?.length ?? 0) + quickRouteCount,
   };
 
   const initials = (user?.username ?? 'A').slice(0, 2).toUpperCase();
