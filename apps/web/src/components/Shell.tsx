@@ -47,8 +47,9 @@ export function Shell() {
   const location = useLocation();
   const title = SECTION_TITLES[location.pathname] ?? 'puente';
 
-  const quickRouteCount = (nodes.data ?? []).filter((n) => isListedQuickTunnel(n.quickTunnel))
-    .length;
+  const quickRouteCount = (nodes.data ?? []).filter((n) =>
+    isListedQuickTunnel(n.quickTunnel),
+  ).length;
   const counts: Record<string, number | undefined> = {
     nodes: nodes.data?.length,
     routes: (routes.data?.length ?? 0) + quickRouteCount,

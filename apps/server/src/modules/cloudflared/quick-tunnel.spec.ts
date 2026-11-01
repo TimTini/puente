@@ -174,9 +174,7 @@ describe('startQuickTunnel', () => {
       if (command.startsWith('cat ')) {
         return {
           stdout:
-            inspects === 0
-              ? 'INF Requesting new quick Tunnel on trycloudflare.com\n'
-              : READY_LOG,
+            inspects === 0 ? 'INF Requesting new quick Tunnel on trycloudflare.com\n' : READY_LOG,
         };
       }
       if (command.includes('echo OWNED')) {
@@ -185,7 +183,13 @@ describe('startQuickTunnel', () => {
       }
       return { stdout: '' };
     });
-    const runtime = await startQuickTunnel(t, 'node_1', 'http://127.0.0.1:8080', 'cloudflared', fast);
+    const runtime = await startQuickTunnel(
+      t,
+      'node_1',
+      'http://127.0.0.1:8080',
+      'cloudflared',
+      fast,
+    );
     expect(runtime.state).toBe('running');
     expect(runtime.publicUrl).toBe('https://demo.trycloudflare.com');
     expect(runtime.lastError).toBeNull();
@@ -204,7 +208,13 @@ describe('startQuickTunnel', () => {
       }
       return { stdout: '' };
     });
-    const runtime = await startQuickTunnel(t, 'node_1', 'http://127.0.0.1:8080', 'cloudflared', fast);
+    const runtime = await startQuickTunnel(
+      t,
+      'node_1',
+      'http://127.0.0.1:8080',
+      'cloudflared',
+      fast,
+    );
     expect(runtime.state).toBe('running');
     expect(runtime.publicUrl).toBe('https://demo.trycloudflare.com');
     expect(runtime.pid).toBe(4242);
